@@ -1,0 +1,62 @@
+services:
+  postgres:
+    image: timescale/timescaledb:latest-pg16
+    container_name: guarus-postgres
+    environment:
+      POSTGRES_DB: guarus_energy
+      POSTGRES_USER: ${DB_USER:-guarus}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U guarus"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build: ./backend
+    container_name: guarus-api
+    environment:
+      - DATABASE_URL=postgresql://${DB_USER:-guarus}:${DB_PASSWORD}@postgres:5432/guarus_energy
+      - JWT_SECRET=${JWT_SECRET}
+      - INGEST_API_KEY=${INGEST_API_KEY}
+      - PORT=3000
+      - HOST=0.0.0.0
+      - CORS_ORIGIN=${CORS_ORIGIN:-*}
+      - AGENT_WS_URL=${AGENT_WS_URL}
+      - AGENT_API_KEY=${AGENT_API_KEY}
+      - SMTP_HOST=${SMTP_HOST:-}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USER=${SMTP_USER:-}
+      - SMTP_PASS=${SMTP_PASS:-}
+      - SMTP_FROM=${SMTP_FROM:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: guarus-frontend
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:alpine
+    container_name: guarus-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./infra/nginx/default.conf:/etc/nginx/conf.d/default.conf
+      - /etc/letsencrypt:/etc/letsencrypt
+    depends_on:
+      - api
+      - frontend
+    restart: unless-stopped
+
+volumes:
+  pgdata:

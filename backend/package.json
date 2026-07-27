@@ -1,0 +1,43 @@
+{
+  "name": "@guarus/backend",
+  "version": "1.0.0",
+  "description": "API do Sistema de Gestão de Energia - Guarus Plaza",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "lint": "eslint src/",
+    "typecheck": "tsc --noEmit",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "db:push": "drizzle-kit push",
+    "db:seed": "tsx src/utils/seed.ts"
+  },
+  "dependencies": {
+    "@fastify/cookie": "^11.0.2",
+    "@fastify/cors": "^11.0.0",
+    "@fastify/jwt": "^9.0.2",
+    "@fastify/rate-limit": "^10.2.2",
+    "@types/nodemailer": "^8.0.1",
+    "bcrypt": "^5.1.1",
+    "dotenv": "^16.4.7",
+    "drizzle-kit": "^0.30.5",
+    "drizzle-orm": "^0.38.4",
+    "fastify": "^5.2.1",
+    "mqtt": "^5.10.4",
+    "nodemailer": "^9.0.3",
+    "postgres": "^3.4.5",
+    "ws": "^8.18.0",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@types/bcrypt": "^5.0.2",
+    "@types/node": "^22.12.0",
+    "@types/ws": "^8.5.14",
+    "eslint": "^9.19.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3",
+    "typescript-eslint": "^8.22.0"
+  }
+}
