@@ -5,3 +5,8 @@ dist/
 *.log
 queue/
 .DS_Store
+
+# graphify: machine-local paths and mtime-keyed cache — not portable across clones
+graphify-out/.graphify_python
+graphify-out/.graphify_root
+graphify-out/cache/

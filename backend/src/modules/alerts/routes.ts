@@ -1,6 +1,6 @@
 import { FastifyInstance } from 'fastify'
 import { db } from '../../config/database'
-import { alerts } from '../../config/schema'
+import { alerts, stores } from '../../config/schema'
 import { eq } from 'drizzle-orm'
 import { authenticate } from '../../utils/auth'
 import { createAlertSchema } from '../../utils/validators'
@@ -14,10 +14,22 @@ export async function alertRoutes(app: FastifyInstance) {
   })
 
   app.post('/', async (request, reply) => {
-    const user = request.user as { tenantId: string }
+    const user = request.user as { tenantId: string; role: string }
     const body = createAlertSchema.parse(request.body)
+
+    // The client-supplied storeId is untrustworthy for a lojista - the frontend
+    // has been sending the logged-in user's own id (users has no FK to stores),
+    // which corrupted alerts.storeId. Resolve it server-side from the tenant
+    // instead of trusting the body for that role.
+    let storeId: string | undefined = body.storeId
+    if (user.role === 'lojista') {
+      const [store] = await db.select().from(stores).where(eq(stores.tenantId, user.tenantId)).limit(1)
+      storeId = store?.id
+    }
+
     const [alert] = await db.insert(alerts).values({
       ...body,
+      storeId,
       tenantId: user.tenantId,
       limite: String(body.limite),
     }).returning()
