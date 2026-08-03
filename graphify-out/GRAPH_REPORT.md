@@ -1,12 +1,18 @@
-# Graph Report - .  (2026-07-27)
+# Graph Report - sistema-guarus-plaza  (2026-07-30)
 
 ## Corpus Check
-- Corpus is ~18,713 words - fits in a single context window. You may not need a graph.
+- 52 files · ~18,982 words
+- Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 355 nodes · 512 edges · 23 communities (19 shown, 4 thin omitted)
-- Extraction: 98% EXTRACTED · 2% INFERRED · 0% AMBIGUOUS · INFERRED: 11 edges (avg confidence: 0.82)
-- Token cost: 91,201 input · 0 output
+- 355 nodes · 489 edges · 22 communities (18 shown, 4 thin omitted)
+- Extraction: 98% EXTRACTED · 2% INFERRED · 0% AMBIGUOUS · INFERRED: 8 edges (avg confidence: 0.83)
+- Token cost: 0 input · 0 output
+
+## Graph Freshness
+- Built from commit: `a93bf5eb`
+- Run `git rev-parse HEAD` and compare to check if the graph is stale.
+- Run `graphify update .` after code changes (no API cost).
 
 ## Community Hubs (Navigation)
 - Config & DB Schema
@@ -22,7 +28,6 @@
 - Frontend Dev Tooling
 - Agent Offline Queue
 - Connectivity Docs (Tailscale Fix)
-- Agent Sync Lifecycle
 - Deploy Script
 - Alerts Feature
 - Billing Feature
@@ -32,13 +37,13 @@
 1. `compilerOptions` - 19 edges
 2. `compilerOptions` - 17 edges
 3. `compilerOptions` - 13 edges
-4. `db` - 13 edges
-5. `authenticate()` - 11 edges
-6. `scripts` - 10 edges
-7. `Sidebar()` - 9 edges
-8. `api` - 9 edges
-9. `meters` - 8 edges
-10. `useAuth()` - 8 edges
+4. `scripts` - 10 edges
+5. `db` - 10 edges
+6. `Sidebar()` - 9 edges
+7. `api` - 9 edges
+8. `meters` - 8 edges
+9. `useAuth()` - 8 edges
+10. `README — Sistema de Gestão de Energia (Guarus Plaza)` - 7 edges
 
 ## Surprising Connections (you probably didn't know these)
 - `Lojista API (consumption, hourly-profile, billing, alerts)` --conceptually_related_to--> `Dashboard do Lojista (UI)`  [AMBIGUOUS]
@@ -60,11 +65,11 @@
 - **Guarus Plaza energy data pipeline (Konect → Mosquitto → Agent → agentSync → TimescaleDB → Backend API → Frontend)** — docs_arquitetura_comunicacao_konect_medidor, docs_arquitetura_comunicacao_mosquitto, docs_arquitetura_comunicacao_agente_local, docs_arquitetura_comunicacao_agent_sync, docs_arquitetura_comunicacao_postgresql_timescaledb, docs_arquitetura_comunicacao_backend_api, docs_arquitetura_comunicacao_frontend_spa [EXTRACTED 1.00]
 - **Docker Compose deployment stack (shopping agent + VPS dashboard)** — docker_compose, docker_compose_prod, docs_checklist_servidor, docs_checklist_shopping, docs_instalacao [INFERRED 0.85]
 
-## Communities (23 total, 4 thin omitted)
+## Communities (22 total, 4 thin omitted)
 
 ### Community 0 - "Config & DB Schema"
-Cohesion: 0.10
-Nodes (41): client, db, env, envSchema, alertLogs, alerts, billingCycles, meters (+33 more)
+Cohesion: 0.07
+Nodes (46): client, db, env, envSchema, alertLogs, alerts, billingCycles, meters (+38 more)
 
 ### Community 1 - "Frontend Routing & Layout"
 Cohesion: 0.09
@@ -114,16 +119,12 @@ Nodes (6): buffer, localServer, mqttClient, QUEUE_DIR, Reading, wss
 Cohesion: 0.44
 Nodes (9): Arquitetura de Comunicação (doc), Checklist - Servidor (VPS), Variáveis de ambiente da VPS (.env), Checklist - Servidor do Shopping (Agente), Variáveis de ambiente do Agente (.env), Como Funciona a Conectividade VPS ↔ Shopping, Decisão de Arquitetura - Conectividade Tailscale, Descrição incorreta original (agente conecta outbound) (+1 more)
 
-### Community 13 - "Agent Sync Lifecycle"
-Cohesion: 0.43
-Nodes (5): start(), connect(), processReadings(), startAgentSync(), startPulling()
-
 ## Ambiguous Edges - Review These
 - `Lojista API (consumption, hourly-profile, billing, alerts)` → `Dashboard do Lojista (UI)`  [AMBIGUOUS]
   docs/VISUALIZACAO_LOJISTA.md · relation: conceptually_related_to
 
 ## Knowledge Gaps
-- **162 isolated node(s):** `name`, `version`, `description`, `type`, `dev` (+157 more)
+- **163 isolated node(s):** `name`, `version`, `description`, `type`, `dev` (+158 more)
   These have ≤1 connection - possible missing edges or undocumented components.
 - **4 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
@@ -135,9 +136,9 @@ _Questions this graph is uniquely positioned to answer:_
 - **Why does `dependencies` connect `Backend Dependencies` to `Backend Dev Tooling`?**
   _High betweenness centrality (0.021) - this node is a cross-community bridge._
 - **What connects `name`, `version`, `description` to the rest of the system?**
-  _162 weakly-connected nodes found - possible documentation gaps or missing edges._
+  _163 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `Config & DB Schema` be split into smaller, more focused modules?**
-  _Cohesion score 0.09701928696668614 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.07459207459207459 - nodes in this community are weakly interconnected._
 - **Should `Frontend Routing & Layout` be split into smaller, more focused modules?**
   _Cohesion score 0.08970099667774087 - nodes in this community are weakly interconnected._
 - **Should `Backend Dependencies` be split into smaller, more focused modules?**
