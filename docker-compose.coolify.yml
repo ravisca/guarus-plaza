@@ -52,6 +52,11 @@ services:
       # Interruptor do seed. O seed NÃO é idempotente — repopularia a cada deploy.
       # Para popular o banco: setar RUN_SEED=1, deployar, e voltar para 0 em seguida.
       - RUN_SEED=${RUN_SEED:-0}
+      # Troca de senha de um usuário existente. A API não tem rota para isso e o
+      # seed grava credenciais que estão publicadas no README. Preencher as duas
+      # variáveis no painel, deployar, e limpar SET_PASSWORD_VALUE em seguida.
+      - SET_PASSWORD_EMAIL=${SET_PASSWORD_EMAIL:-}
+      - SET_PASSWORD_VALUE=${SET_PASSWORD_VALUE:-}
     command:
       - sh
       - -c
@@ -66,6 +71,9 @@ services:
           npm run db:seed || echo "[migrate] seed falhou (banco provavelmente já populado) — seguindo"
         else
           echo "[migrate] RUN_SEED=$$RUN_SEED — seed ignorado"
+        fi
+        if [ -n "$$SET_PASSWORD_EMAIL" ] && [ -n "$$SET_PASSWORD_VALUE" ]; then
+          npm run set-password || echo "[migrate] troca de senha falhou — seguindo"
         fi
     depends_on:
       postgres:
