@@ -59,7 +59,11 @@ services:
         npm run db:push -- --force
         if [ "$$RUN_SEED" = "1" ]; then
           echo "[migrate] RUN_SEED=1 — populando o banco"
-          npm run db:seed
+          # O seed é opcional e não idempotente: num banco já populado ele falha
+          # com violação de unicidade. Isso NÃO pode derrubar o deploy — se o
+          # migrate sai com erro, a api não sobe (service_completed_successfully)
+          # e a stack inteira fica fora do ar. Só o db:push acima é obrigatório.
+          npm run db:seed || echo "[migrate] seed falhou (banco provavelmente já populado) — seguindo"
         else
           echo "[migrate] RUN_SEED=$$RUN_SEED — seed ignorado"
         fi
