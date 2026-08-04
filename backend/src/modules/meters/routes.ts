@@ -1,8 +1,8 @@
 import { FastifyInstance } from 'fastify'
-import { db } from '../../config/database'
-import { meters } from '../../config/schema'
+import { db } from '../../config/database.js'
+import { meters } from '../../config/schema.js'
 import { eq } from 'drizzle-orm'
-import { authenticate } from '../../utils/auth'
+import { authenticate } from '../../utils/auth.js'
 
 export async function meterRoutes(app: FastifyInstance) {
   app.addHook('preHandler', authenticate)

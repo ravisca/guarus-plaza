@@ -1,0 +1,109 @@
+# Stack de produção para deploy no Coolify (build pack: dockercompose).
+#
+# Diferente do docker-compose.prod.yml, que assume uma VPS limpa onde o nginx
+# deste projeto é dono das portas 80/443 e o certbot roda na mão. No Coolify o
+# Traefik já ocupa 80/443 e emite os certificados, então aqui:
+#   - nenhum serviço publica portas no host (só `expose`);
+#   - o nginx de borda usa infra/nginx/coolify.conf (sem 443, sem certificado);
+#   - não há `container_name` fixo — o Coolify sufixa os nomes por deploy e um
+#     nome fixo colide entre stacks.
+#
+# O domínio é atribuído ao serviço `nginx` pelo campo docker_compose_domains da
+# aplicação no Coolify (não por variável de ambiente aqui).
+
+services:
+  postgres:
+    image: timescale/timescaledb:latest-pg16
+    environment:
+      POSTGRES_DB: guarus_energy
+      POSTGRES_USER: ${DB_USER:-guarus}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-guarus} -d guarus_energy"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Sincroniza o schema antes da API subir.
+  #
+  # Reusa o estágio `builder` do backend de propósito: a imagem final roda
+  # `npm ci --omit=dev` e copia só `dist/`, então nela faltam o drizzle.config.ts
+  # e o src/config/schema.ts que o drizzle-kit precisa ler — `db:push` falharia.
+  #
+  # ATENÇÃO: `--force` aplica as alterações sem confirmação interativa (sem ele o
+  # container trava esperando input e o deploy nunca termina). Em base nova isso é
+  # inofensivo, mas numa alteração destrutiva de schema ele derruba a coluna sem
+  # perguntar. Antes de mudar o schema com dados de faturamento em produção,
+  # gere migration versionada (`db:generate` + `db:migrate`) em vez de push.
+  migrate:
+    build:
+      context: ./backend
+      target: builder
+    environment:
+      - DATABASE_URL=postgresql://${DB_USER:-guarus}:${DB_PASSWORD}@postgres:5432/guarus_energy
+      # db:push só precisa de DATABASE_URL, mas o db:seed manual importa
+      # src/config/env.ts, que valida JWT_SECRET (min 32) e INGEST_API_KEY (min 16)
+      # antes de qualquer coisa — sem eles o seed morre no boot.
+      - JWT_SECRET=${JWT_SECRET}
+      - INGEST_API_KEY=${INGEST_API_KEY}
+    command: sh -c "npm run db:push -- --force"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    build: ./backend
+    environment:
+      - DATABASE_URL=postgresql://${DB_USER:-guarus}:${DB_PASSWORD}@postgres:5432/guarus_energy
+      - JWT_SECRET=${JWT_SECRET}
+      - INGEST_API_KEY=${INGEST_API_KEY}
+      - PORT=3000
+      - HOST=0.0.0.0
+      - CORS_ORIGIN=${CORS_ORIGIN:-*}
+      - AGENT_WS_URL=${AGENT_WS_URL:-}
+      - AGENT_API_KEY=${AGENT_API_KEY:-}
+      - SMTP_HOST=${SMTP_HOST:-}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USER=${SMTP_USER:-}
+      - SMTP_PASS=${SMTP_PASS:-}
+      - SMTP_FROM=${SMTP_FROM:-}
+    expose:
+      - "3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3000/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    expose:
+      - "80"
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:alpine
+    volumes:
+      - ./infra/nginx/coolify.conf:/etc/nginx/conf.d/default.conf:ro
+    expose:
+      - "80"
+    depends_on:
+      - api
+      - frontend
+    restart: unless-stopped
+
+volumes:
+  pgdata:

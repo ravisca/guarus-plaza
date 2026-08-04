@@ -1,9 +1,9 @@
 import WebSocket from 'ws'
-import { db } from '../../config/database'
-import { readings, meters } from '../../config/schema'
+import { db } from '../../config/database.js'
+import { readings, meters } from '../../config/schema.js'
 import { eq } from 'drizzle-orm'
 
-const AGENT_WS_URL = process.env.AGENT_WS_URL || 'ws://localhost:9200'
+const AGENT_WS_URL = process.env.AGENT_WS_URL || ''
 const AGENT_API_KEY = process.env.AGENT_API_KEY || 'guarus-local-agent-2026'
 
 let ws: WebSocket | null = null
@@ -102,6 +102,14 @@ async function processReadings(rawReadings: any[]) {
 }
 
 export function startAgentSync() {
+  // Sem AGENT_WS_URL não há agente para puxar leituras: antes disso o default
+  // era ws://localhost:9200, o que gerava um loop de reconexão a cada 5s no log
+  // de produção enquanto o servidor do shopping não estivesse no ar.
+  if (!AGENT_WS_URL) {
+    console.log('[AGENT-SYNC] AGENT_WS_URL não definido — sincronização com o agente desativada')
+    return
+  }
+
   console.log(`[AGENT-SYNC] Starting. Agent: ${AGENT_WS_URL}`)
   connect()
 }

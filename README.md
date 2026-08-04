@@ -71,11 +71,29 @@ npm run dev          # Inicia em http://localhost:5173
 
 ## Deploy em Produção
 
-### VPS
+### VPS limpa (nginx próprio + certbot)
 
 ```bash
 docker compose -f docker-compose.prod.yml up -d --build
 ```
+
+### VPS com Coolify (Traefik já ocupa 80/443)
+
+Use `docker-compose.coolify.yml`. Diferenças em relação ao `prod`: nenhum serviço
+publica portas no host, o nginx de borda usa `infra/nginx/coolify.conf` (sem bloco
+443 — o TLS é do Traefik) e há um serviço `migrate` que roda `db:push` antes da API
+subir. O domínio é atribuído ao serviço `nginx` pelo campo `docker_compose_domains`
+da aplicação no Coolify.
+
+O **seed não roda automaticamente** (não é idempotente). Rode uma vez, pelo terminal
+do Coolify no container `migrate`:
+
+```bash
+npm run db:seed
+```
+
+E **troque a senha do admin logo em seguida** — a das credenciais de teste acima é
+pública.
 
 ### Servidor do Shopping
 

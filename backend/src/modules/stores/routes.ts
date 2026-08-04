@@ -1,9 +1,9 @@
 import { FastifyInstance } from 'fastify'
-import { db } from '../../config/database'
-import { stores } from '../../config/schema'
+import { db } from '../../config/database.js'
+import { stores } from '../../config/schema.js'
 import { eq } from 'drizzle-orm'
-import { authenticate } from '../../utils/auth'
-import { createStoreSchema } from '../../utils/validators'
+import { authenticate } from '../../utils/auth.js'
+import { createStoreSchema } from '../../utils/validators.js'
 
 export async function storeRoutes(app: FastifyInstance) {
   app.addHook('preHandler', authenticate)

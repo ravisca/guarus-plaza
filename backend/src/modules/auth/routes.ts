@@ -1,9 +1,9 @@
 import { FastifyInstance } from 'fastify'
 import { eq } from 'drizzle-orm'
 import bcrypt from 'bcrypt'
-import { db } from '../../config/database'
-import { users } from '../../config/schema'
-import { loginSchema } from '../../utils/validators'
+import { db } from '../../config/database.js'
+import { users } from '../../config/schema.js'
+import { loginSchema } from '../../utils/validators.js'
 
 export async function authRoutes(app: FastifyInstance) {
   app.post('/login', async (request, reply) => {

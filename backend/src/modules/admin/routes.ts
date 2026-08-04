@@ -1,9 +1,9 @@
 import { FastifyInstance } from 'fastify'
-import { db } from '../../config/database'
-import { stores, meters, readings, tenants, tariffs, billingCycles } from '../../config/schema'
+import { db } from '../../config/database.js'
+import { stores, meters, readings, tenants, tariffs, billingCycles } from '../../config/schema.js'
 import { eq, sql, desc, and } from 'drizzle-orm'
-import { requireAdmin } from '../../utils/auth'
-import { createStoreSchema, createMeterSchema, closeBillingSchema, createTariffSchema } from '../../utils/validators'
+import { requireAdmin } from '../../utils/auth.js'
+import { createStoreSchema, createMeterSchema, closeBillingSchema, createTariffSchema } from '../../utils/validators.js'
 
 export async function adminRoutes(app: FastifyInstance) {
   app.addHook('preHandler', requireAdmin)
@@ -33,6 +33,8 @@ export async function adminRoutes(app: FastifyInstance) {
     // Aggregate per-store: sum consumption from all meters of each store
     const storeMap = new Map<string, { storeId: string; nome: string; kwh: number }>()
     for (const row of topStoresRaw) {
+      // meters.storeId é nullable no schema (medidor pode não estar atribuído).
+      if (!row.storeId) continue
       const existing = storeMap.get(row.storeId)
       if (existing) {
         existing.kwh += Number(row.kwh)

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import Sidebar from '../../components/Sidebar'
 import api from '../../services/api'
-import { Zap, DollarSign, Activity, TrendingUp, TrendingDown, ArrowUpRight } from 'lucide-react'
+import { Zap, DollarSign, Activity, TrendingUp, TrendingDown } from 'lucide-react'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar } from 'recharts'
 
 interface Reading {

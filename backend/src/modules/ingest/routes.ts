@@ -1,9 +1,9 @@
 import { FastifyInstance } from 'fastify'
-import { db } from '../../config/database'
-import { readings, meters } from '../../config/schema'
+import { db } from '../../config/database.js'
+import { readings, meters } from '../../config/schema.js'
 import { eq } from 'drizzle-orm'
-import { env } from '../../config/env'
-import { ingestBatchSchema } from '../../utils/validators'
+import { env } from '../../config/env.js'
+import { ingestBatchSchema } from '../../utils/validators.js'
 
 export async function ingestRoutes(app: FastifyInstance) {
   app.get('/health', async () => ({ status: 'ok' }))

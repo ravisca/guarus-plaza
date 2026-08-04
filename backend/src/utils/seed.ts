@@ -1,5 +1,5 @@
-import { db } from '../config/database'
-import { tenants, stores, meters, users, tariffs } from '../config/schema'
+import { db } from '../config/database.js'
+import { tenants, stores, meters, users, tariffs } from '../config/schema.js'
 import bcrypt from 'bcrypt'
 
 async function seed() {

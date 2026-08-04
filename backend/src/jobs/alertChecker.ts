@@ -1,6 +1,6 @@
 import nodemailer from 'nodemailer'
-import { db } from '../config/database'
-import { alerts, alertLogs, readings, meters, stores, users } from '../config/schema'
+import { db } from '../config/database.js'
+import { alerts, alertLogs, readings, meters, stores, users } from '../config/schema.js'
 import { eq, sql, and } from 'drizzle-orm'
 
 const transporter = nodemailer.createTransport({
@@ -43,6 +43,8 @@ async function getAlertChecks(): Promise<AlertCheck[]> {
 
   for (const alert of activeAlerts) {
     if (!alert.storeId) continue
+    // Sem tenant não há destinatário: checkAlerts() resolve o usuário por tenantId.
+    if (!alert.tenantId) continue
 
     const storeMeters = await db.select({ id: meters.id }).from(meters).where(eq(meters.storeId, alert.storeId))
     const meterIds = storeMeters.map(m => m.id)

@@ -1,8 +1,8 @@
 import { FastifyInstance } from 'fastify'
-import { db } from '../../config/database'
-import { billingCycles, stores } from '../../config/schema'
+import { db } from '../../config/database.js'
+import { billingCycles, stores } from '../../config/schema.js'
 import { eq, desc } from 'drizzle-orm'
-import { authenticate } from '../../utils/auth'
+import { authenticate } from '../../utils/auth.js'
 
 export async function billingRoutes(app: FastifyInstance) {
   app.addHook('preHandler', authenticate)

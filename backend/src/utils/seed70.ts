@@ -1,5 +1,5 @@
-import { db } from '../config/database'
-import { tenants, stores, meters, users, readings, tariffs } from '../config/schema'
+import { db } from '../config/database.js'
+import { tenants, stores, meters, users, readings, tariffs } from '../config/schema.js'
 import { eq } from 'drizzle-orm'
 import bcrypt from 'bcrypt'
 

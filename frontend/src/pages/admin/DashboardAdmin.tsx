@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import Sidebar from '../../components/Sidebar'
 import api from '../../services/api'
-import { Zap, Store, Cable, Activity, TrendingUp, RefreshCw, ArrowUpRight, AlertTriangle } from 'lucide-react'
+import { Zap, Store, Cable, TrendingUp, RefreshCw, AlertTriangle } from 'lucide-react'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts'
 
 interface DashboardData {
