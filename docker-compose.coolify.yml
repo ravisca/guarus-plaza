@@ -49,7 +49,20 @@ services:
       # antes de qualquer coisa — sem eles o seed morre no boot.
       - JWT_SECRET=${JWT_SECRET}
       - INGEST_API_KEY=${INGEST_API_KEY}
-    command: sh -c "npm run db:push -- --force"
+      # Interruptor do seed. O seed NÃO é idempotente — repopularia a cada deploy.
+      # Para popular o banco: setar RUN_SEED=1, deployar, e voltar para 0 em seguida.
+      - RUN_SEED=${RUN_SEED:-0}
+    command:
+      - sh
+      - -c
+      - |
+        npm run db:push -- --force
+        if [ "$$RUN_SEED" = "1" ]; then
+          echo "[migrate] RUN_SEED=1 — populando o banco"
+          npm run db:seed
+        else
+          echo "[migrate] RUN_SEED=$$RUN_SEED — seed ignorado"
+        fi
     depends_on:
       postgres:
         condition: service_healthy
