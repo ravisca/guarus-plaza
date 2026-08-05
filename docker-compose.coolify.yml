@@ -89,6 +89,13 @@ services:
       - PORT=3000
       - HOST=0.0.0.0
       - CORS_ORIGIN=${CORS_ORIGIN:-*}
+      # Fuso do shopping. Sem isto o container roda em UTC e o mês de faturamento
+      # começava às 21h do último dia do mês anterior, em horário de Brasília.
+      - TZ=America/Sao_Paulo
+      - FUSO_FATURAMENTO=America/Sao_Paulo
+      # Acima desta lacuna de coleta o fechamento trava em 'requer_revisao' em vez
+      # de emitir valor sobre um período que se sabe incompleto.
+      - LACUNA_MAX_MIN=${LACUNA_MAX_MIN:-30}
       - AGENT_WS_URL=${AGENT_WS_URL:-}
       - AGENT_API_KEY=${AGENT_API_KEY:-}
       - SMTP_HOST=${SMTP_HOST:-}

@@ -1,4 +1,4 @@
-import { pgTable, uuid, varchar, numeric, timestamp, doublePrecision, inet, integer, boolean, date, text, uniqueIndex, index } from 'drizzle-orm/pg-core'
+import { pgTable, uuid, varchar, numeric, timestamp, doublePrecision, inet, integer, boolean, date, text, uniqueIndex, index, primaryKey } from 'drizzle-orm/pg-core'
 
 export const tenants = pgTable('tenants', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -62,8 +62,16 @@ export const readings = pgTable('readings', {
   power: doublePrecision('power'),
   powerFactor: doublePrecision('power_factor'),
 }, (table) => [
+  // Chave primária composta: sem ela, uma reentrega do MQTT com QoS 1 gravava a
+  // mesma leitura duas vezes. Isso não incomodava o cálculo antigo (max - min),
+  // mas com soma de deltas a duplicata vira consumo inflado — e consumo inflado
+  // vira cobrança indevida.
+  //
+  // A ordem (meterId, time) também é o que o TimescaleDB exige caso `readings`
+  // venha a ser convertida em hypertable: a coluna de particionamento precisa
+  // fazer parte da chave.
+  primaryKey({ columns: [table.meterId, table.time] }),
   index('idx_readings_time').on(table.time),
-  index('idx_readings_meter').on(table.meterId, table.time),
 ])
 
 export const alerts = pgTable('alerts', {
@@ -102,8 +110,27 @@ export const billingCycles = pgTable('billing_cycles', {
   kwhTotal: numeric('kwh_total', { precision: 12, scale: 2 }).default('0').notNull(),
   tarifaKwh: numeric('tarifa_kwh', { precision: 8, scale: 4 }).notNull(),
   valorTotal: numeric('valor_total', { precision: 12, scale: 2 }).default('0').notNull(),
+  // 'aberto' | 'fechado' | 'requer_revisao'
   status: varchar('status', { length: 20 }).default('aberto').notNull(),
   fechadoEm: timestamp('fechado_em'),
+
+  // ─── Trilha de auditoria ───────────────────────────────────────────
+  //
+  // Sem isto a fatura é um número solto: o lojista não consegue conferir de onde
+  // ele saiu, e uma contestação não tem como ser reconstituída. Com estes campos
+  // a fatura passa a ser verificável como uma conta de luz — leitura inicial,
+  // leitura final, e quantas amostras sustentam o valor.
+  leituraInicial: doublePrecision('leitura_inicial'),
+  leituraFinal: doublePrecision('leitura_final'),
+  amostras: integer('amostras').default(0).notNull(),
+  // Maior intervalo sem leitura dentro do período, em minutos. É o que denuncia
+  // queda de coleta e dispara o status 'requer_revisao'.
+  lacunaMaiorMin: integer('lacuna_maior_min').default(0).notNull(),
+  // Deltas descartados por serem fisicamente impossíveis ou por queda do
+  // acumulador (medidor zerado/trocado).
+  anomaliasDescartadas: integer('anomalias_descartadas').default(0).notNull(),
+  observacao: text('observacao'),
+
   createdAt: timestamp('created_at').defaultNow().notNull(),
 }, (table) => [
   uniqueIndex('idx_billing_store_period').on(table.storeId, table.mes, table.ano),

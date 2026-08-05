@@ -49,6 +49,44 @@ const MAPA = {
   kwh:          { bloco: 200, qtd: 10, reg: 200 }, // energia ativa (kWh)
 }
 
+/**
+ * Faixas fisicamente possíveis. Servem para reconhecer leitura corrompida —
+ * frame truncado, float lido em offset errado, ruído no barramento.
+ *
+ * Isso importa porque o faturamento soma incrementos de energia: um valor
+ * absurdo que passe daqui vira consumo cobrado do lojista.
+ */
+const LIMITES = {
+  voltage:      { min: 90,  max: 300 },
+  current:      { min: 0,   max: 10000 },
+  power:        { min: -1e7, max: 1e7 },   // negativo é válido: geração/reativo
+  power_factor: { min: -1,  max: 1 },
+  kwh:          { min: 0,   max: 1e9 },
+}
+
+/** Divergência tolerada entre as duas leituras do acumulador no mesmo ciclo. */
+const TOLERANCIA_KWH = Number(process.env.TOLERANCIA_KWH || 1)
+
+const ESTADO_PATH = process.env.ESTADO_PATH || path.join(__dirname, 'data', 'estado.json')
+
+function carregarEstado() {
+  try {
+    if (fs.existsSync(ESTADO_PATH)) return JSON.parse(fs.readFileSync(ESTADO_PATH, 'utf-8'))
+  } catch (err) {
+    console.error(`[ESTADO] não foi possível ler ${ESTADO_PATH}: ${err.message}`)
+  }
+  return {}
+}
+
+function salvarEstado(estado) {
+  try {
+    fs.mkdirSync(path.dirname(ESTADO_PATH), { recursive: true })
+    fs.writeFileSync(ESTADO_PATH, JSON.stringify(estado, null, 2))
+  } catch (err) {
+    console.error(`[ESTADO] não foi possível gravar: ${err.message}`)
+  }
+}
+
 // ─── Leitura Modbus ──────────────────────────────────────────────────
 
 /** Extrai um float32 DCBA do buffer, dado o registrador e o início do bloco. */
@@ -60,9 +98,10 @@ function lerFloat(buffer, blocoInicio, registrador) {
   return v
 }
 
-async function lerMedidor(medidor) {
+async function lerMedidor(medidor, estado) {
   const client = new ModbusRTU()
   const blocos = new Map()
+  let kwhConfirmacao = null
 
   try {
     await client.connectTCP(medidor.ip, { port: medidor.porta || MODBUS_PORT })
@@ -78,6 +117,13 @@ async function lerMedidor(medidor) {
       const r = await client.readInputRegisters(inicio, qtd)
       blocos.set(inicio, r.buffer)
     }
+
+    // Segunda leitura do acumulador, no mesmo ciclo. É a defesa contra frame
+    // corrompido: um valor absurdo lido uma vez dificilmente se repete idêntico,
+    // e é justamente esse tipo de valor que contamina o faturamento.
+    const specKwh = MAPA.kwh
+    const r2 = await client.readInputRegisters(specKwh.bloco, specKwh.qtd)
+    kwhConfirmacao = lerFloat(r2.buffer, specKwh.bloco, specKwh.reg)
   } finally {
     try { client.close() } catch (_) { /* já fechado */ }
   }
@@ -94,7 +140,45 @@ async function lerMedidor(medidor) {
     throw new Error('registrador de energia (200) não retornou valor válido')
   }
 
-  return {
+  if (kwhConfirmacao == null || Math.abs(kwhConfirmacao - readings.kwh) > TOLERANCIA_KWH) {
+    throw new Error(
+      `leituras de energia divergentes no mesmo ciclo (${readings.kwh} vs ${kwhConfirmacao}) — ` +
+      'possível frame corrompido, ciclo descartado'
+    )
+  }
+
+  // Grandezas fora da faixa física são zeradas, não publicadas com valor errado.
+  // A energia é exceção: se ela estiver fora da faixa, o ciclo inteiro cai.
+  const foraDeFaixa = []
+  for (const [campo, faixa] of Object.entries(LIMITES)) {
+    const v = readings[campo]
+    if (v == null) continue
+    if (v < faixa.min || v > faixa.max) {
+      foraDeFaixa.push(`${campo}=${v}`)
+      if (campo === 'kwh') throw new Error(`energia fora da faixa física: ${v}`)
+      readings[campo] = null
+    }
+  }
+  if (foraDeFaixa.length > 0) {
+    console.error(`[FAIXA] ${medidor.ip}: descartado ${foraDeFaixa.join(', ')}`)
+  }
+
+  // Queda do acumulador: medidor zerado, trocado, ou leitura ruim que passou
+  // pelas checagens anteriores. Sinaliza em vez de silenciar — o fechamento
+  // precisa saber que aconteceu para poder travar o ciclo.
+  const anterior = estado[medidor.device]
+  let anomalia = null
+  if (anterior && anterior.kwh != null && readings.kwh < anterior.kwh) {
+    anomalia = 'queda_acumulador'
+    console.error(
+      `[ANOMALIA] ${medidor.ip} (${medidor.device}): energia retrocedeu ` +
+      `${anterior.kwh} -> ${readings.kwh}. Medidor zerado ou substituído?`
+    )
+  }
+
+  estado[medidor.device] = { kwh: readings.kwh, em: new Date().toISOString() }
+
+  const payload = {
     device: medidor.device,
     timestamp: new Date().toISOString(),
     readings: {
@@ -105,6 +189,9 @@ async function lerMedidor(medidor) {
       power_factor: readings.power_factor,
     },
   }
+  if (anomalia) payload.anomalia = anomalia
+
+  return payload
 }
 
 // ─── Execução com concorrência limitada ──────────────────────────────
@@ -142,12 +229,13 @@ function carregarMedidores() {
 
 async function ciclo(medidores, client) {
   const inicio = Date.now()
+  const estado = carregarEstado()
   let ok = 0
   let falhas = 0
 
   await emLotes(medidores, CONCORRENCIA, async (medidor) => {
     try {
-      const leitura = await lerMedidor(medidor)
+      const leitura = await lerMedidor(medidor, estado)
       const topico = `konect/${medidor.device}/readings`
       await new Promise((resolve, reject) => {
         client.publish(topico, JSON.stringify(leitura), { qos: 1 }, (err) => {
@@ -165,6 +253,8 @@ async function ciclo(medidores, client) {
       console.error(`[ERRO] ${medidor.ip} (${medidor.device}): ${err.message}`)
     }
   })
+
+  salvarEstado(estado)
 
   const seg = ((Date.now() - inicio) / 1000).toFixed(1)
   console.log(`[CICLO] ${ok} ok, ${falhas} falha(s), ${seg}s`)

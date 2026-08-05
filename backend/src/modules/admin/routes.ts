@@ -4,6 +4,7 @@ import { stores, meters, readings, tenants, tariffs, billingCycles } from '../..
 import { eq, sql, desc, and } from 'drizzle-orm'
 import { requireAdmin } from '../../utils/auth.js'
 import { createStoreSchema, createMeterSchema, closeBillingSchema, createTariffSchema } from '../../utils/validators.js'
+import { limitesDoMes, medirConsumo, faixasTarifarias, LACUNA_MAX_MIN, FUSO_LOCAL } from '../billing/calculo.js'
 
 export async function adminRoutes(app: FastifyInstance) {
   app.addHook('preHandler', requireAdmin)
@@ -124,15 +125,16 @@ export async function adminRoutes(app: FastifyInstance) {
 
   app.post('/billing/close', async (request) => {
     const body = closeBillingSchema.parse(request.body)
-    const startOfMonth = new Date(body.ano, body.mes - 1, 1)
-    const endOfMonth = new Date(body.ano, body.mes, 0, 23, 59, 59)
 
-    const [currentTariff] = await db
-      .select()
-      .from(tariffs)
-      .where(sql`${tariffs.vigenteDesde} <= ${endOfMonth.toISOString().split('T')[0]}`)
-      .orderBy(desc(tariffs.vigenteDesde))
-      .limit(1)
+    // Limites do mês no fuso do shopping, não no fuso do processo. O container
+    // roda em UTC: com `new Date(ano, mes-1, 1)` o mês começava às 21h do último
+    // dia do mês anterior, em horário de Brasília.
+    const { inicio, fim } = await limitesDoMes(body.ano, body.mes)
+
+    // O consumo é medido separadamente em cada faixa de vigência de tarifa, para
+    // que uma tarifa que passe a valer no dia 20 não seja cobrada sobre o
+    // consumo dos dias 1 a 19.
+    const faixas = await faixasTarifarias(inicio, fim)
 
     const allStores = await db.select().from(stores)
     const results = []
@@ -143,54 +145,76 @@ export async function adminRoutes(app: FastifyInstance) {
 
       if (meterIds.length === 0) continue
 
-      // Calculate consumption per meter individually, then sum
-      const meterConsumptions = await db
-        .select({
-          meterId: readings.meterId,
-          kwh: sql<number>`coalesce(max(${readings.kwh}) - min(${readings.kwh}), 0)`,
-        })
-        .from(readings)
-        .where(
-          and(
-            sql`${readings.time} >= ${startOfMonth.toISOString()}`,
-            sql`${readings.time} <= ${endOfMonth.toISOString()}`,
-            sql`${readings.meterId} in ${meterIds}`
-          )
-        )
-        .groupBy(readings.meterId)
+      const periodo = await medirConsumo(meterIds, inicio, fim)
 
-      const kwhTotal = meterConsumptions.reduce((acc, m) => acc + Number(m.kwh), 0)
-      const tarifaKwh = Number(currentTariff?.valorKwh || 0)
-      const valorTotal = kwhTotal * tarifaKwh
+      let valorTotal = 0
+      let tarifaEfetiva = 0
+
+      if (faixas.length === 0) {
+        // Sem tarifa cadastrada não há como valorar — fecha para revisão em vez
+        // de emitir fatura de valor zero, que passaria despercebida.
+        valorTotal = 0
+      } else if (faixas.length === 1) {
+        tarifaEfetiva = faixas[0].valorKwh
+        valorTotal = periodo.consumoKwh * tarifaEfetiva
+      } else {
+        for (const faixa of faixas) {
+          const parcial = await medirConsumo(meterIds, faixa.inicio, faixa.fim)
+          valorTotal += parcial.consumoKwh * faixa.valorKwh
+        }
+        // Guardada para conferência: é o preço médio que o lojista pagou por kWh.
+        tarifaEfetiva = periodo.consumoKwh > 0 ? valorTotal / periodo.consumoKwh : faixas[faixas.length - 1].valorKwh
+      }
+
+      const motivos: string[] = []
+      if (periodo.amostras === 0) motivos.push('nenhuma leitura no período')
+      if (periodo.lacunaMaiorMin > LACUNA_MAX_MIN) {
+        motivos.push(`lacuna de coleta de ${periodo.lacunaMaiorMin} min (limite ${LACUNA_MAX_MIN})`)
+      }
+      if (periodo.anomaliasDescartadas > 0) {
+        motivos.push(`${periodo.anomaliasDescartadas} leitura(s) descartada(s) por valor implausível ou queda do acumulador`)
+      }
+      if (faixas.length === 0) motivos.push('nenhuma tarifa vigente cadastrada')
+
+      // Nunca emitir valor sobre um número que se sabe incompleto: é preferível
+      // travar o fechamento e exigir conferência humana.
+      const requerRevisao = motivos.length > 0
+      const valorFinal = requerRevisao ? 0 : valorTotal
+
+      const dados = {
+        kwhTotal: String(periodo.consumoKwh.toFixed(2)),
+        tarifaKwh: String(tarifaEfetiva.toFixed(4)),
+        valorTotal: String(valorFinal.toFixed(2)),
+        status: requerRevisao ? 'requer_revisao' : 'fechado',
+        fechadoEm: new Date(),
+        leituraInicial: periodo.leituraInicial,
+        leituraFinal: periodo.leituraFinal,
+        amostras: periodo.amostras,
+        lacunaMaiorMin: periodo.lacunaMaiorMin,
+        anomaliasDescartadas: periodo.anomaliasDescartadas,
+        observacao: requerRevisao ? motivos.join('; ') : null,
+      }
 
       const [billing] = await db
         .insert(billingCycles)
-        .values({
-          storeId: store.id,
-          mes: body.mes,
-          ano: body.ano,
-          kwhTotal: String(kwhTotal),
-          tarifaKwh: String(tarifaKwh),
-          valorTotal: String(valorTotal),
-          status: 'fechado',
-          fechadoEm: new Date(),
-        })
+        .values({ storeId: store.id, mes: body.mes, ano: body.ano, ...dados })
         .onConflictDoUpdate({
           target: [billingCycles.storeId, billingCycles.mes, billingCycles.ano],
-          set: {
-            kwhTotal: String(kwhTotal),
-            tarifaKwh: String(tarifaKwh),
-            valorTotal: String(valorTotal),
-            status: 'fechado',
-            fechadoEm: new Date(),
-          },
+          set: dados,
         })
         .returning()
 
       results.push(billing)
     }
 
-    return { closed: results.length, billing: results }
+    const paraRevisao = results.filter((b) => b.status === 'requer_revisao').length
+
+    return {
+      closed: results.length,
+      requerRevisao: paraRevisao,
+      periodo: { inicio: inicio.toISOString(), fim: fim.toISOString(), fuso: FUSO_LOCAL },
+      billing: results,
+    }
   })
 
   app.get('/tariffs', async () => {
