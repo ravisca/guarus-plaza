@@ -49,6 +49,9 @@ services:
       # antes de qualquer coisa — sem eles o seed morre no boot.
       - JWT_SECRET=${JWT_SECRET}
       - INGEST_API_KEY=${INGEST_API_KEY}
+      # Mesmo fuso da api: o teste de faturamento precisa rodar no ambiente real,
+      # já que o fuso do processo é justamente o que deslocava os limites do mês.
+      - TZ=America/Sao_Paulo
       # Interruptor do seed. O seed NÃO é idempotente — repopularia a cada deploy.
       # Para popular o banco: setar RUN_SEED=1, deployar, e voltar para 0 em seguida.
       - RUN_SEED=${RUN_SEED:-0}

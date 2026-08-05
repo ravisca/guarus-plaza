@@ -54,7 +54,12 @@ export const users = pgTable('users', {
 ])
 
 export const readings = pgTable('readings', {
-  time: timestamp('time').notNull(),
+  // COM fuso, de propósito. Com `timestamp without time zone` o instante gravado
+  // dependia do fuso do processo Node: o driver interpretava o valor como hora
+  // local ao ler e ao gravar. Depois de definir TZ=America/Sao_Paulo no
+  // container, o mês de faturamento passou a começar às 06:00Z em vez de 03:00Z.
+  // Com timestamptz o instante é absoluto e não há o que interpretar.
+  time: timestamp('time', { withTimezone: true }).notNull(),
   meterId: uuid('meter_id').references(() => meters.id).notNull(),
   kwh: doublePrecision('kwh'),
   voltage: doublePrecision('voltage'),

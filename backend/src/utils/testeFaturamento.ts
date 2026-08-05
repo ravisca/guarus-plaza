@@ -91,7 +91,7 @@ async function main() {
     const meio = new Date(inicio.getTime() + 10 * 86400000)
     const kwhMeio = await inserirSerie(id, inicio, meio, 30, 1000, 0.5)
     // um frame corrompido: valor mil vezes maior
-    await db.execute(sql`INSERT INTO readings (time, meter_id, kwh) VALUES (${meio.toISOString()}::timestamp, ${id}, ${kwhMeio * 1000})`)
+    await db.execute(sql`INSERT INTO readings (time, meter_id, kwh) VALUES (${meio.toISOString()}::timestamptz, ${id}, ${kwhMeio * 1000})`)
     const depois = new Date(meio.getTime() + 60000)
     await inserirSerie(id, depois, new Date(meio.getTime() + 10 * 86400000), 30, kwhMeio, 0.5)
 
@@ -143,10 +143,10 @@ async function main() {
   {
     const id = await criarMedidor('04')
     const t = new Date(inicio.getTime() + 3600000)
-    await db.execute(sql`INSERT INTO readings (time, meter_id, kwh) VALUES (${t.toISOString()}::timestamp, ${id}, 100)`)
+    await db.execute(sql`INSERT INTO readings (time, meter_id, kwh) VALUES (${t.toISOString()}::timestamptz, ${id}, 100)`)
     let rejeitou = false
     try {
-      await db.execute(sql`INSERT INTO readings (time, meter_id, kwh) VALUES (${t.toISOString()}::timestamp, ${id}, 100)`)
+      await db.execute(sql`INSERT INTO readings (time, meter_id, kwh) VALUES (${t.toISOString()}::timestamptz, ${id}, 100)`)
     } catch {
       rejeitou = true
     }
@@ -162,8 +162,8 @@ async function main() {
     const id = await criarMedidor('05')
     // 23h00 local do último dia do mês = 02:00 UTC do dia seguinte
     const ultimoLocal = new Date(fim.getTime() - 3600000)  // 23:00 local
-    await db.execute(sql`INSERT INTO readings (time, meter_id, kwh) VALUES (${ultimoLocal.toISOString()}::timestamp, ${id}, 500)`)
-    await db.execute(sql`INSERT INTO readings (time, meter_id, kwh) VALUES (${new Date(ultimoLocal.getTime() + 1800000).toISOString()}::timestamp, ${id}, 510)`)
+    await db.execute(sql`INSERT INTO readings (time, meter_id, kwh) VALUES (${ultimoLocal.toISOString()}::timestamptz, ${id}, 500)`)
+    await db.execute(sql`INSERT INTO readings (time, meter_id, kwh) VALUES (${new Date(ultimoLocal.getTime() + 1800000).toISOString()}::timestamptz, ${id}, 510)`)
 
     const r = await medirConsumo([id], inicio, fim)
     const { inicio: proxIni, fim: proxFim } = await limitesDoMes(ANO, MES + 1)

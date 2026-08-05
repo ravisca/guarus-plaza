@@ -55,10 +55,15 @@ const VAZIO: ConsumoMedido = {
  * último dia do mês anterior, em horário de Brasília.
  */
 export async function limitesDoMes(ano: number, mes: number): Promise<{ inicio: Date; fim: Date }> {
+  // Devolve timestamptz (instante absoluto), não timestamp. Um `AT TIME ZONE
+  // 'UTC'` a mais aqui converteria de volta para timestamp sem fuso, e o driver
+  // reinterpretaria o valor como hora local do processo — foi assim que o mês
+  // passou a começar às 06:00Z em vez de 03:00Z depois de definirmos TZ no
+  // container.
   const [r] = await db.execute<{ inicio: Date; fim: Date }>(sql`
     SELECT
-      (make_timestamp(${ano}, ${mes}, 1, 0, 0, 0) AT TIME ZONE ${FUSO_LOCAL}) AT TIME ZONE 'UTC' AS inicio,
-      ((make_timestamp(${ano}, ${mes}, 1, 0, 0, 0) + interval '1 month') AT TIME ZONE ${FUSO_LOCAL}) AT TIME ZONE 'UTC' AS fim
+      (make_timestamp(${ano}, ${mes}, 1, 0, 0, 0) AT TIME ZONE ${FUSO_LOCAL}) AS inicio,
+      ((make_timestamp(${ano}, ${mes}, 1, 0, 0, 0) + interval '1 month') AT TIME ZONE ${FUSO_LOCAL}) AS fim
   `)
   return { inicio: new Date(r.inicio), fim: new Date(r.fim) }
 }
@@ -114,7 +119,7 @@ export async function medirConsumo(
         LAG(time) OVER (PARTITION BY meter_id ORDER BY time) AS time_ant
       FROM readings
       WHERE meter_id = ANY(${listaIds})
-        AND time >= ${iniIso}::timestamp AND time < ${fimIso}::timestamp
+        AND time >= ${iniIso}::timestamptz AND time < ${fimIso}::timestamptz
         AND kwh IS NOT NULL
     ),
     deltas AS (
@@ -187,7 +192,7 @@ export async function faixasTarifarias(inicio: Date, fim: Date): Promise<FaixaTa
   const linhas = await db.execute<{ valor_kwh: string; vigente_desde: string }>(sql`
     SELECT valor_kwh, vigente_desde
     FROM tariffs
-    WHERE vigente_desde < ((${fim.toISOString()}::timestamp AT TIME ZONE 'UTC') AT TIME ZONE ${FUSO_LOCAL})::date + 1
+    WHERE vigente_desde < (${fim.toISOString()}::timestamptz AT TIME ZONE ${FUSO_LOCAL})::date + 1
     ORDER BY vigente_desde ASC
   `)
 
@@ -197,7 +202,7 @@ export async function faixasTarifarias(inicio: Date, fim: Date): Promise<FaixaTa
   const marcos: { em: Date; valor: number }[] = []
   for (const l of linhas) {
     const [conv] = await db.execute<{ em: Date }>(sql`
-      SELECT (${l.vigente_desde}::timestamp AT TIME ZONE ${FUSO_LOCAL}) AT TIME ZONE 'UTC' AS em
+      SELECT (${l.vigente_desde}::timestamp AT TIME ZONE ${FUSO_LOCAL}) AS em
     `)
     marcos.push({ em: new Date(conv.em), valor: Number(l.valor_kwh) })
   }
