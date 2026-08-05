@@ -53,25 +53,38 @@ Função 4 (input registers), unit 255, float32 **little-endian (DCBA)**:
 |---|---|
 | `kwh` | 200 |
 | `voltage` | 10 |
-| `current` | 16 |
-| `power` | 34 |
-| `power_factor` | 20 |
+| `current` | 16 (média) |
+| `power` | 34 (total) |
+| `power_factor` | **58** |
 
-Detalhes e como foi descoberto: `scripts/dash_Plaza/05-mapa-modbus-kron.md`.
+O fator de potência está no 58, não no 20 — o 20 é corrente de fase. Detalhes e como
+foi validado: `scripts/dash_Plaza/05-mapa-modbus-kron.md`.
 
-## ⚠️ Antes de usar para faturar
+## Validação da escala
 
-O mapa veio de **engenharia reversa, não de documentação do fabricante**. Ele identifica
-*onde* está cada grandeza; não garante *escala* nem *multiplicador*.
+O mapa veio de engenharia reversa, mas a escala foi confirmada por coerência interna,
+sem depender de documentação:
 
-Um TC de 200:5 mal aplicado, ou kWh confundido com Wh, gera conta 40x ou 1000x errada
-para o lojista. Antes de emitir qualquer cobrança:
+```
+P1+P2+P3 = 37.832 W  vs  P0 = 37.819 W        (potências por fase somam o total)
+P0/S0    = 0,9188    vs  reg 58 = 0,9161      (FP é P/S, por definição)
+3 × V × I × FP = 37.863 W  vs  lido 37.819 W  (erro de 0,12%)
+```
 
-1. Obter a tabela Modbus oficial da Kron para o modelo exato
-2. Conferir contra o display do próprio medidor, no local
-3. Fechar um mês e comparar com a fatura da concessionária
+Se a relação do TC não estivesse aplicada, corrente e potência não fechariam entre si.
+Com 0,12% de erro, o medidor entrega valores primários com o TC já aplicado.
 
-Para monitoramento, o mapa atual já serve.
+## ⚠️ Ainda assim, antes da primeira fatura
+
+A validação acima prova coerência e escala, **não aferição**. Confiar no faturamento
+pressupõe medidor com certificação metrológica válida do INMETRO — isso é do parque
+físico, não do software.
+
+Recomendado no primeiro ciclo: conferir a leitura inicial e final registradas pelo
+sistema contra o display de uma amostra de medidores, e comparar a soma das lojas com a
+fatura da concessionária. Se o contrato do shopping tiver demanda contratada ou tarifa
+horossazonal, essa soma não fecha por construção — o sistema cobra energia por tarifa
+única.
 
 ## Notas de implementação
 

@@ -41,10 +41,14 @@ const UMA_VEZ = process.argv.includes('--once')
  */
 const MAPA = {
   // bloco de grandezas instantâneas
-  voltage:      { bloco: 0,   qtd: 20, reg: 10 },  // tensão de fase (V)
-  current:      { bloco: 0,   qtd: 20, reg: 16 },  // corrente (A)
-  power_factor: { bloco: 20,  qtd: 20, reg: 20 },  // fator de potência
-  power:        { bloco: 20,  qtd: 20, reg: 34 },  // potência ativa (W)
+  voltage:      { bloco: 0,   qtd: 20, reg: 10 },  // U1, tensão de fase (V)
+  current:      { bloco: 0,   qtd: 20, reg: 16 },  // I0, corrente média (A)
+  power:        { bloco: 20,  qtd: 20, reg: 34 },  // P0, potência ativa total (W)
+  // FP0 no registrador 58 — NÃO no 20. O 20 é corrente de fase (I1), e usá-lo
+  // como fator de potência produzia valores impossíveis (12,06 e 83,59 em
+  // medidores diferentes; FP nunca passa de 1). Confirmado pela definição:
+  // FP0 = P0/S0 = 37.819/41.162 = 0,9188, contra 0,9161 lido no reg 58.
+  power_factor: { bloco: 40,  qtd: 20, reg: 58 },  // FP0, fator de potência total
   // bloco de energia acumulada — lido com qtd 10; com 20 o medidor recusa
   kwh:          { bloco: 200, qtd: 10, reg: 200 }, // energia ativa (kWh)
 }
