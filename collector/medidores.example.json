@@ -1,0 +1,30 @@
+[
+  {
+    "_comentario": "Copie este arquivo para medidores.json e ajuste. 'device' precisa ser IGUAL ao campo macAddress cadastrado no dashboard — é por ele que o backend casa a leitura com a loja (backend/src/modules/agentSync compara com meters.macAddress).",
+    "ip": "192.168.3.17",
+    "device": "70:B3:D5:72:DB:01",
+    "loja": "descricao livre, so para leitura humana"
+  },
+  {
+    "ip": "192.168.3.18",
+    "device": "70:B3:D5:72:DB:00",
+    "loja": ""
+  },
+  {
+    "ip": "192.168.3.29",
+    "device": "70:B3:D5:72:DB:0C",
+    "loja": ""
+  },
+  {
+    "ip": "192.168.3.185",
+    "device": "70:B3:D5:72:DA:F0",
+    "loja": ""
+  },
+  {
+    "_nota_unitid": "Se algum medidor usar outro unit id ou porta, sobrescreva por medidor:",
+    "ip": "192.168.3.199",
+    "device": "70:B3:D5:72:DA:FF",
+    "unitId": 255,
+    "porta": 502
+  }
+]

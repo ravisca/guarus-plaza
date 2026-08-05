@@ -1,0 +1,14 @@
+{
+  "name": "@guarus/collector",
+  "version": "1.0.0",
+  "description": "Le os medidores Kron via Modbus TCP e publica as leituras no broker MQTT",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "testar": "node index.js --once"
+  },
+  "dependencies": {
+    "modbus-serial": "^8.0.17",
+    "mqtt": "^5.10.4"
+  }
+}
