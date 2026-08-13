@@ -112,6 +112,19 @@ async function lerMedidor(medidor, estado) {
     client.setID(medidor.unitId != null ? medidor.unitId : UNIT_ID)
     client.setTimeout(TIMEOUT_MS)
 
+    // Medidor embarcado costuma cortar a conexão sem encerrar direito, e o socket
+    // emite 'error' de forma assíncrona — fora deste try/catch. Sem um listener,
+    // o Node trata como exceção não capturada e derruba o processo inteiro: um
+    // medidor com problema levaria junto a coleta dos outros 40.
+    const sock = client._port && client._port._client
+    if (sock && typeof sock.on === 'function') {
+      sock.on('error', (err) => {
+        if (process.env.VERBOSE === '1') {
+          console.error(`[SOCKET] ${medidor.ip}: ${err.code || err.message}`)
+        }
+      })
+    }
+
     // Uma leitura por bloco distinto, não uma por grandeza.
     const necessarios = new Map()
     for (const campo of Object.values(MAPA)) {
@@ -309,6 +322,34 @@ async function main() {
 
 process.on('SIGINT', () => { console.log('\n[COLETOR] encerrando'); process.exit(0) })
 process.on('SIGTERM', () => process.exit(0))
+
+// Rede de segurança para erros de socket que escapam do listener por medidor.
+//
+// Só engole falhas de rede conhecidas: são esperadas quando se fala com dezenas
+// de equipamentos embarcados, e nenhuma delas deixa o processo em estado
+// inconsistente. Qualquer outro erro não capturado é bug de verdade e deve
+// derrubar o processo — o serviço reinicia e o problema aparece no log, em vez
+// de ficar mascarado e coletando dado errado em silêncio.
+const REDE = new Set(['ECONNRESET', 'EPIPE', 'ETIMEDOUT', 'ECONNREFUSED', 'EHOSTUNREACH', 'ENETUNREACH', 'ECONNABORTED'])
+
+process.on('uncaughtException', (err) => {
+  if (REDE.has(err.code)) {
+    console.error(`[REDE] ${err.code} ignorado (erro de socket fora do ciclo)`)
+    return
+  }
+  console.error('[FATAL] erro não tratado:', err)
+  process.exit(1)
+})
+
+process.on('unhandledRejection', (motivo) => {
+  const code = motivo && motivo.code
+  if (REDE.has(code)) {
+    console.error(`[REDE] ${code} ignorado (promise rejeitada por socket)`)
+    return
+  }
+  console.error('[FATAL] promise rejeitada sem tratamento:', motivo)
+  process.exit(1)
+})
 
 main().catch((err) => {
   console.error(`[FATAL] ${err.message}`)
