@@ -286,7 +286,12 @@ async function ciclo(medidores, client) {
   salvarEstado(estado)
 
   const seg = ((Date.now() - inicio) / 1000).toFixed(1)
-  console.log(`[CICLO] ${ok} ok, ${falhas} falha(s), ${seg}s`)
+  // Os erros de rede aparecem só como contagem: com os Kron eles são rotina
+  // (um por medidor, ao encerrar), e o que importa é notar se o número foge do
+  // esperado — não ler 82 linhas iguais a cada ciclo.
+  const rede = errosDeRede > 0 ? `, ${errosDeRede} reset(s) de socket` : ''
+  errosDeRede = 0
+  console.log(`[CICLO] ${ok} ok, ${falhas} falha(s), ${seg}s${rede}`)
 }
 
 async function main() {
@@ -332,21 +337,29 @@ process.on('SIGTERM', () => process.exit(0))
 // de ficar mascarado e coletando dado errado em silêncio.
 const REDE = new Set(['ECONNRESET', 'EPIPE', 'ETIMEDOUT', 'ECONNREFUSED', 'EHOSTUNREACH', 'ENETUNREACH', 'ECONNABORTED'])
 
-process.on('uncaughtException', (err) => {
-  if (REDE.has(err.code)) {
-    console.error(`[REDE] ${err.code} ignorado (erro de socket fora do ciclo)`)
-    return
+// Os Kron encerram cortando a conexão: todo medidor gera um ECONNRESET DEPOIS da
+// leitura ter dado certo. Logar cada um poluiria o log com 82 linhas por ciclo,
+// escondendo problema real e enchendo o disco. Então conta e reporta no resumo;
+// a linha individual sai só com VERBOSE=1.
+let errosDeRede = 0
+
+function tratarRede(code, origem) {
+  if (!REDE.has(code)) return false
+  errosDeRede++
+  if (process.env.VERBOSE === '1') {
+    console.error(`[REDE] ${code} ignorado (${origem})`)
   }
+  return true
+}
+
+process.on('uncaughtException', (err) => {
+  if (tratarRede(err.code, 'socket fora do ciclo')) return
   console.error('[FATAL] erro não tratado:', err)
   process.exit(1)
 })
 
 process.on('unhandledRejection', (motivo) => {
-  const code = motivo && motivo.code
-  if (REDE.has(code)) {
-    console.error(`[REDE] ${code} ignorado (promise rejeitada por socket)`)
-    return
-  }
+  if (tratarRede(motivo && motivo.code, 'promise rejeitada por socket')) return
   console.error('[FATAL] promise rejeitada sem tratamento:', motivo)
   process.exit(1)
 })
