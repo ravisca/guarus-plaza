@@ -217,7 +217,19 @@ function carregarMedidores() {
     console.error('[CONFIG] copie medidores.example.json para medidores.json e ajuste')
     process.exit(1)
   }
-  const lista = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf-8'))
+  // Remove o BOM antes do parse. JSON.parse rejeita BOM com "Unexpected token
+  // 'ï»¿'", e no Windows é fácil o arquivo vir com ele: `Out-File -Encoding utf8`
+  // do PowerShell 5.1 sempre grava BOM, e é assim que o medidores.json é gerado.
+  const bruto = fs.readFileSync(CONFIG_PATH, 'utf-8').replace(/^﻿/, '')
+
+  let lista
+  try {
+    lista = JSON.parse(bruto)
+  } catch (err) {
+    console.error(`[CONFIG] ${CONFIG_PATH} não é um JSON válido: ${err.message}`)
+    console.error('[CONFIG] se o arquivo veio do PowerShell, pode estar com BOM ou em UTF-16.')
+    process.exit(1)
+  }
   if (!Array.isArray(lista) || lista.length === 0) {
     console.error('[CONFIG] o arquivo precisa ser um array com ao menos um medidor')
     process.exit(1)
