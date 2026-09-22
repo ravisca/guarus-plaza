@@ -25,6 +25,26 @@ const mqtt = require('mqtt')
 
 const CONFIG_PATH = process.env.MEDIDORES_CONFIG || path.join(__dirname, 'medidores.json')
 const MQTT_BROKER = process.env.MQTT_BROKER || 'mqtt://localhost:1883'
+
+/**
+ * Credenciais do broker. Opcionais para não quebrar o broker anônimo de
+ * desenvolvimento — mas no servidor do shopping são obrigatórias, porque lá o
+ * `allow_anonymous` está desligado (ver mosquitto/config/mosquitto.producao.conf).
+ *
+ * Vale a pena insistir no motivo: quem publica em `konect/+/readings` decide o
+ * consumo que será cobrado da loja.
+ */
+const MQTT_USER = process.env.MQTT_USER || ''
+const MQTT_PASS = process.env.MQTT_PASS || ''
+
+function opcoesDoBroker(extras) {
+  const opcoes = Object.assign({}, extras)
+  if (MQTT_USER) {
+    opcoes.username = MQTT_USER
+    opcoes.password = MQTT_PASS
+  }
+  return opcoes
+}
 const INTERVALO_MS = Number(process.env.INTERVALO_SEG || 30) * 1000
 const MODBUS_PORT = Number(process.env.MODBUS_PORT || 502)
 const UNIT_ID = Number(process.env.MODBUS_UNIT_ID || 255)
@@ -299,11 +319,11 @@ async function main() {
 
   console.log('[COLETOR] iniciando')
   console.log(`  medidores : ${medidores.length}`)
-  console.log(`  broker    : ${MQTT_BROKER}`)
+  console.log(`  broker    : ${MQTT_BROKER}${MQTT_USER ? ` (usuário ${MQTT_USER})` : ' (anônimo)'}`)
   console.log(`  intervalo : ${INTERVALO_MS / 1000}s`)
   console.log(`  unit id   : ${UNIT_ID}`)
 
-  const client = mqtt.connect(MQTT_BROKER, { reconnectPeriod: 5000 })
+  const client = mqtt.connect(MQTT_BROKER, opcoesDoBroker({ reconnectPeriod: 5000 }))
 
   client.on('error', (err) => console.error(`[MQTT] ${err.message}`))
   client.on('reconnect', () => console.log('[MQTT] reconectando...'))

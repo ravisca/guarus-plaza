@@ -1,49 +1,20 @@
-import Fastify from 'fastify'
-import cors from '@fastify/cors'
-import jwt from '@fastify/jwt'
-import rateLimit from '@fastify/rate-limit'
+import { construirApp } from './app.js'
 import { env } from './config/env.js'
-import { authRoutes } from './modules/auth/routes.js'
-import { adminRoutes } from './modules/admin/routes.js'
-import { storeRoutes } from './modules/stores/routes.js'
-import { meterRoutes } from './modules/meters/routes.js'
-import { readingRoutes } from './modules/readings/routes.js'
-import { billingRoutes } from './modules/billing/routes.js'
-import { alertRoutes } from './modules/alerts/routes.js'
-import { ingestRoutes } from './modules/ingest/routes.js'
 import { checkAlerts } from './jobs/alertChecker.js'
+import { atualizarStatusDosMedidores } from './jobs/meterStatus.js'
 import { startAgentSync } from './modules/agentSync/index.js'
 
-const app = Fastify({ logger: true })
+const app = await construirApp()
 
-await app.register(cors, {
-  origin: process.env.CORS_ORIGIN || true,
-  credentials: true,
-})
-
-await app.register(jwt, {
-  secret: env.JWT_SECRET,
-  sign: { expiresIn: env.JWT_EXPIRES_IN },
-})
-
-await app.register(rateLimit, {
-  max: 100,
-  timeWindow: '1 minute',
-})
-
-app.get('/health', async () => ({ status: 'ok', timestamp: new Date().toISOString() }))
-
-await app.register(authRoutes, { prefix: '/api/auth' })
-await app.register(adminRoutes, { prefix: '/api/admin' })
-await app.register(storeRoutes, { prefix: '/api/stores' })
-await app.register(meterRoutes, { prefix: '/api/meters' })
-await app.register(readingRoutes, { prefix: '/api/readings' })
-await app.register(billingRoutes, { prefix: '/api/billing' })
-await app.register(alertRoutes, { prefix: '/api/alerts' })
-await app.register(ingestRoutes, { prefix: '/api/ingest' })
-
-// Cron: verificar alertas a cada 5 minutos
+// Cron: a cada 5 minutos, marcar medidor sem comunicação e verificar alertas.
+// A ordem importa: o status dos medidores é atualizado antes, para que o alerta
+// avalie o estado corrente.
 setInterval(async () => {
+  try {
+    await atualizarStatusDosMedidores()
+  } catch (err: any) {
+    app.log.error(`Meter status error: ${err.message}`)
+  }
   try {
     await checkAlerts()
   } catch (err: any) {
@@ -51,7 +22,8 @@ setInterval(async () => {
   }
 }, 5 * 60 * 1000)
 
-// Verificar alertas na inicialização
+// Primeira passada na inicialização
+atualizarStatusDosMedidores().catch(err => app.log.error(`Initial meter status error: ${err.message}`))
 checkAlerts().catch(err => app.log.error(`Initial alert check error: ${err.message}`))
 
 async function start() {

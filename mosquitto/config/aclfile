@@ -1,0 +1,18 @@
+# ACL do broker do shopping — quem pode falar o quê.
+#
+# Sem isto, uma credencial válida qualquer publica em qualquer tópico. Com isto,
+# mesmo que a senha do agent vaze, ela não serve para publicar leitura: o agent
+# só lê.
+#
+# Usado por `mosquitto.producao.conf` (acl_file).
+
+# Ninguém tem permissão por padrão.
+topic deny #
+
+# O coletor publica as leituras dos medidores Kron. Só publica.
+user coletor
+topic write konect/+/readings
+
+# O agent consome as leituras e as entrega à VPS. Só lê.
+user agent
+topic read konect/+/readings

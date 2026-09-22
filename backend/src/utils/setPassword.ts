@@ -2,6 +2,7 @@ import bcrypt from 'bcrypt'
 import { eq } from 'drizzle-orm'
 import { db } from '../config/database.js'
 import { users } from '../config/schema.js'
+import { SENHA_MINIMA } from './validators.js'
 
 // Redefine a senha de um usuário existente.
 //
@@ -24,10 +25,10 @@ if (!email || !senha) {
   process.exit(1)
 }
 
-// O login valida senha com z.string().min(6); rejeitar aqui evita gravar uma
-// senha que depois seria impossível usar.
-if (senha.length < 6) {
-  console.error('[set-password] a senha precisa ter no mínimo 6 caracteres')
+// A política de senha é aplicada aqui, no ponto em que a senha é definida — e
+// não no login, onde o mínimo trancaria para fora quem já tem senha curta.
+if (senha.length < SENHA_MINIMA) {
+  console.error(`[set-password] a senha precisa ter no mínimo ${SENHA_MINIMA} caracteres`)
   process.exit(1)
 }
 

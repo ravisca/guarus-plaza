@@ -8,7 +8,9 @@ const envSchema = z.object({
   JWT_SECRET: z.string().min(32),
   JWT_EXPIRES_IN: z.string().default('15m'),
   REFRESH_EXPIRES_IN: z.string().default('7d'),
-  INGEST_API_KEY: z.string().min(16),
+  // Era obrigatória por causa de POST /api/ingest, que foi removido (ROB-04).
+  // Continua aceita para não quebrar ambiente que já a define no painel.
+  INGEST_API_KEY: z.string().min(16).optional(),
   PORT: z.coerce.number().default(3000),
   HOST: z.string().default('0.0.0.0'),
   MQTT_BROKER_URL: z.string().default('mqtt://localhost:1883'),

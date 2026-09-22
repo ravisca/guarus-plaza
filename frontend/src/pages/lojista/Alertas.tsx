@@ -1,9 +1,22 @@
 import { useEffect, useState } from 'react'
 import Sidebar from '../../components/Sidebar'
-import api from '../../services/api'
-import { Plus, Trash2, Bell, BellOff, Zap, Activity, Gauge, Clock } from 'lucide-react'
+import api, { mensagemDeErro } from '../../services/api'
+import { useAuth } from '../../hooks/useAuth'
+import { Erro, Sucesso, Carregando, Vazio, Aviso } from '../../components/Feedback'
+import { Plus, Trash2, Bell, BellOff, Zap, Activity, Gauge, Clock, X } from 'lucide-react'
 
-interface Alert {
+/**
+ * Alertas.
+ *
+ * Três coisas estavam erradas aqui. O formulário mandava `storeId: user.id` — o
+ * id do usuário no lugar do id da loja, que o backend precisou passar a ignorar.
+ * O tipo "desperdício fora do horário" era oferecido e **não tinha implementação
+ * nenhuma** no verificador: o lojista configurava um alerta que nunca dispararia
+ * e não tinha como saber. E o campo `ativo` existia no banco, a rota `PUT`
+ * existia, e não havia botão para ligar ou desligar nada.
+ */
+
+interface Alerta {
   id: string
   tipo: string
   limite: string
@@ -11,35 +24,103 @@ interface Alert {
   ativo: boolean
 }
 
-const alertTypes: Record<string, { label: string; icon: any; color: string }> = {
-  consumo_mensal: { label: 'Consumo Mensal (kWh)', icon: Zap, color: 'text-green-600' },
-  horario_sem_atividade: { label: 'Desperdício Fora do Horário', icon: Clock, color: 'text-yellow-600' },
-  fator_potencia_baixo: { label: 'Fator de Potência Baixo', icon: Activity, color: 'text-blue-600' },
-  tensao_fora_padrao: { label: 'Tensão Fora do Padrão', icon: Gauge, color: 'text-purple-600' },
+const TIPOS: Record<string, { label: string; icon: any; cor: string; unidade: string; ajuda: string }> = {
+  consumo_mensal: {
+    label: 'Consumo mensal',
+    icon: Zap,
+    cor: 'text-green-600',
+    unidade: 'kWh',
+    ajuda: 'Avisa quando o consumo acumulado do mês passa do limite.',
+  },
+  horario_sem_atividade: {
+    label: 'Desperdício fora do horário',
+    icon: Clock,
+    cor: 'text-yellow-600',
+    unidade: 'kWh em 24h',
+    ajuda: 'Avisa quando há consumo fora do horário de funcionamento. Exige o horário cadastrado na loja.',
+  },
+  fator_potencia_baixo: {
+    label: 'Fator de potência baixo',
+    icon: Activity,
+    cor: 'text-blue-600',
+    unidade: '(0 a 1)',
+    ajuda: 'Avisa quando a média das últimas 24h cai abaixo do valor informado. Referência usual: 0,92.',
+  },
+  tensao_fora_padrao: {
+    label: 'Tensão fora do padrão',
+    icon: Gauge,
+    cor: 'text-purple-600',
+    unidade: 'V de desvio',
+    ajuda: 'Avisa quando a tensão média das últimas 24h se afasta de 220 V mais que o informado. 15 V equivale à faixa 205–235 V.',
+  },
 }
 
+const FORM_VAZIO = { tipo: 'consumo_mensal', limite: '', canal: 'email' }
+
 export default function Alertas() {
-  const [alerts, setAlerts] = useState<Alert[]>([])
-  const [showForm, setShowForm] = useState(false)
-  const [form, setForm] = useState({ tipo: 'consumo_mensal', limite: '', canal: 'email' })
+  const { lojaAtual } = useAuth()
+  const [alertas, setAlertas] = useState<Alerta[]>([])
+  const [carregando, setCarregando] = useState(true)
+  const [erro, setErro] = useState('')
+  const [sucesso, setSucesso] = useState('')
+  const [form, setForm] = useState<typeof FORM_VAZIO | null>(null)
+  const [salvando, setSalvando] = useState(false)
 
-  useEffect(() => {
-    api.get('/alerts').then(res => setAlerts(res.data))
-  }, [])
+  const carregar = () => {
+    setCarregando(true)
+    setErro('')
+    api.get('/alerts')
+      .then((r) => setAlertas(r.data))
+      .catch((err) => setErro(mensagemDeErro(err, 'Não foi possível carregar os alertas.')))
+      .finally(() => setCarregando(false))
+  }
 
-  const handleCreate = async (e: React.FormEvent) => {
+  useEffect(carregar, [])
+
+  const criar = async (e: React.FormEvent) => {
     e.preventDefault()
-    const user = JSON.parse(localStorage.getItem('user') || '{}')
-    await api.post('/alerts', { ...form, storeId: user.id, limite: Number(form.limite) })
-    setShowForm(false)
-    setForm({ tipo: 'consumo_mensal', limite: '', canal: 'email' })
-    api.get('/alerts').then(res => setAlerts(res.data))
+    if (!form || !lojaAtual) return
+    setSalvando(true)
+    setErro('')
+    try {
+      // O id da LOJA, não o do usuário.
+      await api.post('/alerts', {
+        ...form,
+        storeId: lojaAtual.id,
+        limite: Number(form.limite.replace(',', '.')),
+      })
+      setForm(null)
+      setSucesso('Alerta criado.')
+      carregar()
+    } catch (err) {
+      setErro(mensagemDeErro(err, 'Não foi possível criar o alerta.'))
+    } finally {
+      setSalvando(false)
+    }
   }
 
-  const handleDelete = async (id: string) => {
-    await api.delete(`/alerts/${id}`)
-    setAlerts(alerts.filter(a => a.id !== id))
+  const alternar = async (a: Alerta) => {
+    setErro('')
+    try {
+      await api.put(`/alerts/${a.id}`, { ativo: !a.ativo })
+      setAlertas(alertas.map((x) => (x.id === a.id ? { ...x, ativo: !x.ativo } : x)))
+    } catch (err) {
+      setErro(mensagemDeErro(err, 'Não foi possível alterar o alerta.'))
+    }
   }
+
+  const remover = async (a: Alerta) => {
+    if (!confirm('Remover este alerta?')) return
+    setErro('')
+    try {
+      await api.delete(`/alerts/${a.id}`)
+      setAlertas(alertas.filter((x) => x.id !== a.id))
+    } catch (err) {
+      setErro(mensagemDeErro(err, 'Não foi possível remover o alerta.'))
+    }
+  }
+
+  const tipoAtual = form ? TIPOS[form.tipo] : null
 
   return (
     <div className="flex min-h-screen bg-gray-50">
@@ -48,108 +129,116 @@ export default function Alertas() {
         <div className="flex items-center justify-between mb-8">
           <div>
             <h1 className="text-2xl font-bold text-gray-900 tracking-tight">Alertas</h1>
-            <p className="text-gray-500 text-sm mt-1">{alerts.length} alertas configurados</p>
+            <p className="text-gray-500 text-sm mt-1">{alertas.length} configurados</p>
           </div>
           <button
-            onClick={() => setShowForm(!showForm)}
-            className="inline-flex items-center gap-2 px-5 py-2.5 bg-green-600 hover:bg-green-700 text-white font-semibold text-sm rounded-xl transition-all shadow-sm"
+            onClick={() => setForm(form ? null : { ...FORM_VAZIO })}
+            disabled={!lojaAtual}
+            className="inline-flex items-center gap-2 px-5 py-2.5 bg-green-600 hover:bg-green-700 text-white font-semibold text-sm rounded-xl transition-all shadow-sm disabled:opacity-50"
           >
-            <Plus className="w-4 h-4" />
-            Novo Alerta
+            {form ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+            {form ? 'Cancelar' : 'Novo alerta'}
           </button>
         </div>
 
-        {showForm && (
+        <Erro mensagem={erro} aoTentarDeNovo={carregar} />
+        <Sucesso mensagem={sucesso} />
+
+        <Aviso
+          titulo="Um aviso por alerta a cada 24 horas"
+          mensagem="Enquanto a condição persistir, o alerta não é reenviado — a verificação roda a cada 5 minutos e você receberia centenas de e-mails por dia."
+        />
+
+        {form && tipoAtual && (
           <div className="bg-white rounded-2xl border border-gray-100 p-6 mb-6 shadow-sm">
-            <h3 className="font-semibold text-gray-900 mb-4">Criar Novo Alerta</h3>
-            <form onSubmit={handleCreate} className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <h3 className="font-semibold text-gray-900 mb-4">Criar alerta</h3>
+            <form onSubmit={criar} className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Tipo de Alerta</label>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Tipo</label>
                 <select
                   value={form.tipo}
-                  onChange={e => setForm({ ...form, tipo: e.target.value })}
-                  className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-gray-900 focus:outline-none focus:ring-2 focus:ring-green-500/20 focus:border-green-500 transition-all text-sm"
+                  onChange={(e) => setForm({ ...form, tipo: e.target.value })}
+                  className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-green-500/20 focus:border-green-500"
                 >
-                  {Object.entries(alertTypes).map(([key, { label }]) => (
-                    <option key={key} value={key}>{label}</option>
+                  {Object.entries(TIPOS).map(([valor, t]) => (
+                    <option key={valor} value={valor}>{t.label}</option>
                   ))}
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Limite</label>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Limite <span className="text-gray-400 font-normal">({tipoAtual.unidade})</span>
+                </label>
                 <input
-                  placeholder="Ex: 500"
-                  type="number"
-                  step="0.01"
                   value={form.limite}
-                  onChange={e => setForm({ ...form, limite: e.target.value })}
-                  className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-green-500/20 focus:border-green-500 transition-all text-sm"
+                  onChange={(e) => setForm({ ...form, limite: e.target.value })}
                   required
+                  className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-green-500/20 focus:border-green-500"
                 />
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Canal</label>
-                <div className="flex gap-2">
-                  <select
-                    value={form.canal}
-                    onChange={e => setForm({ ...form, canal: e.target.value })}
-                    className="flex-1 px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-gray-900 focus:outline-none focus:ring-2 focus:ring-green-500/20 focus:border-green-500 transition-all text-sm"
-                  >
-                    <option value="email">E-mail</option>
-                    <option value="whatsapp">WhatsApp</option>
-                  </select>
-                  <button type="submit" className="inline-flex items-center justify-center gap-2 px-5 py-3 bg-green-600 hover:bg-green-700 text-white font-semibold text-sm rounded-xl transition-all shadow-sm">
-                    Salvar
-                  </button>
-                </div>
+                <select
+                  value={form.canal}
+                  onChange={(e) => setForm({ ...form, canal: e.target.value })}
+                  className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-green-500/20 focus:border-green-500"
+                >
+                  <option value="email">E-mail</option>
+                </select>
+              </div>
+              <div className="md:col-span-3">
+                <p className="text-xs text-gray-500 mb-3">{tipoAtual.ajuda}</p>
+                <button
+                  type="submit"
+                  disabled={salvando}
+                  className="px-5 py-2.5 bg-green-600 hover:bg-green-700 text-white font-semibold text-sm rounded-xl transition-all disabled:opacity-50"
+                >
+                  {salvando ? 'Salvando...' : 'Criar alerta'}
+                </button>
               </div>
             </form>
           </div>
         )}
 
-        <div className="space-y-3">
-          {alerts.map(alert => {
-            const alertConfig = alertTypes[alert.tipo] || { label: alert.tipo, icon: Bell, color: 'text-gray-600' }
-            const Icon = alertConfig.icon
-            
-            return (
-              <div key={alert.id} className="bg-white rounded-2xl border border-gray-100 p-5 shadow-sm hover:shadow-md hover:border-gray-200 hover:-translate-y-0.5 transition-all duration-200">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-4">
-                    <div className={`${alert.ativo ? 'bg-green-50 border-green-100' : 'bg-gray-100 border-gray-200'} p-3 rounded-xl border`}>
-                      <Icon className={`w-5 h-5 ${alert.ativo ? alertConfig.color : 'text-gray-400'}`} />
+        <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden shadow-sm">
+          {carregando ? (
+            <Carregando />
+          ) : alertas.length === 0 ? (
+            <Vazio titulo="Nenhum alerta" descricao="Crie um alerta para ser avisado sem precisar abrir o painel." />
+          ) : (
+            <div className="divide-y divide-gray-100">
+              {alertas.map((a) => {
+                const t = TIPOS[a.tipo] || { label: a.tipo, icon: Bell, cor: 'text-gray-500', unidade: '', ajuda: '' }
+                const Icone = t.icon
+                return (
+                  <div key={a.id} className="flex items-center gap-4 p-5">
+                    <div className={`p-2.5 rounded-xl border ${a.ativo ? 'bg-gray-50 border-gray-100' : 'bg-gray-50 border-gray-100 opacity-50'}`}>
+                      <Icone className={`w-5 h-5 ${t.cor}`} />
                     </div>
-                    <div>
-                      <p className="font-semibold text-gray-900">{alertConfig.label}</p>
-                      <div className="flex items-center gap-3 mt-1">
-                        <span className="text-sm text-gray-500">Limite: <span className="font-medium text-gray-700">{alert.limite}</span></span>
-                        <span className="text-gray-300">•</span>
-                        <span className="text-sm text-gray-500 capitalize">{alert.canal}</span>
-                        <span className="text-gray-300">•</span>
-                        <span className={`inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-full ${alert.ativo ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-gray-100 text-gray-600 border border-gray-200'}`}>
-                          {alert.ativo ? 'Ativo' : 'Inativo'}
-                        </span>
-                      </div>
+                    <div className="flex-1 min-w-0">
+                      <p className={`text-sm font-medium ${a.ativo ? 'text-gray-900' : 'text-gray-400'}`}>
+                        {t.label}
+                      </p>
+                      <p className="text-xs text-gray-500">
+                        Limite: {Number(a.limite).toLocaleString('pt-BR')} {t.unidade} · {a.canal}
+                      </p>
                     </div>
+                    <button
+                      onClick={() => alternar(a)}
+                      className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors ${a.ativo ? 'bg-green-50 text-green-700 border-green-200 hover:bg-green-100' : 'bg-gray-50 text-gray-500 border-gray-200 hover:bg-gray-100'}`}
+                    >
+                      {a.ativo ? <><Bell className="w-3.5 h-3.5" /> ativo</> : <><BellOff className="w-3.5 h-3.5" /> pausado</>}
+                    </button>
+                    <button
+                      onClick={() => remover(a)}
+                      className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                      title="Remover"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
                   </div>
-                  <button
-                    onClick={() => handleDelete(alert.id)}
-                    className="inline-flex items-center justify-center p-2 text-red-500 hover:text-red-700 hover:bg-red-50 rounded-lg transition-all"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
-            )
-          })}
-          
-          {alerts.length === 0 && (
-            <div className="bg-white rounded-2xl border border-gray-100 p-12 text-center shadow-sm">
-              <div className="bg-gray-100 w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4">
-                <BellOff className="w-8 h-8 text-gray-400" />
-              </div>
-              <p className="text-gray-600 font-medium">Nenhum alerta configurado</p>
-              <p className="text-sm text-gray-400 mt-1">Crie um alerta para ser notificado sobre consumo anômalo</p>
+                )
+              })}
             </div>
           )}
         </div>

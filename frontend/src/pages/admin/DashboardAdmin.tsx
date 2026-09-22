@@ -4,12 +4,20 @@ import api from '../../services/api'
 import { Zap, Store, Cable, TrendingUp, RefreshCw, AlertTriangle } from 'lucide-react'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts'
 
+interface MedidorOffline {
+  id: string
+  numeroSerie: string
+  storeNome: string | null
+  lastSeen: string | null
+}
+
 interface DashboardData {
   totalStores: number
   activeTenants: number
   offlineMeters: number
   totalConsumption: number
   topStores: { storeId: string; nome: string; kwh: number }[]
+  medidoresOffline: MedidorOffline[]
 }
 
 const COLORS = ['#22c55e', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899', '#f97316', '#6366f1', '#14b8a6']
@@ -17,13 +25,17 @@ const COLORS = ['#22c55e', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'
 export default function DashboardAdmin() {
   const [data, setData] = useState<DashboardData | null>(null)
   const [loading, setLoading] = useState(true)
+  const [erro, setErro] = useState('')
 
   const fetchData = () => {
     setLoading(true)
-    api.get('/admin/dashboard').then(res => {
-      setData(res.data)
-      setLoading(false)
-    })
+    api.get('/admin/dashboard')
+      .then(res => {
+        setData(res.data)
+        setErro('')
+      })
+      .catch(err => setErro(err.response?.data?.error || 'Não foi possível carregar o painel agora.'))
+      .finally(() => setLoading(false))
   }
 
   useEffect(() => { fetchData() }, [])
@@ -31,6 +43,15 @@ export default function DashboardAdmin() {
   const formatKwh = (v: number) => {
     if (v >= 1000) return `${(v / 1000).toFixed(1)} MWh`
     return `${v.toFixed(1)} kWh`
+  }
+
+  const desdeQuando = (lastSeen: string | null) => {
+    if (!lastSeen) return 'nunca comunicou'
+    const minutos = Math.floor((Date.now() - new Date(lastSeen).getTime()) / 60000)
+    if (minutos < 60) return `há ${minutos} min`
+    const horas = Math.floor(minutos / 60)
+    if (horas < 48) return `há ${horas} h`
+    return `há ${Math.floor(horas / 24)} dias`
   }
 
   return (
@@ -107,6 +128,42 @@ export default function DashboardAdmin() {
             </div>
           </div>
         </div>
+
+        {/* Quem está sem comunicação, e desde quando. A contagem sozinha não diz
+            o que a operação precisa para agir antes do fechamento do mês. */}
+        {data?.medidoresOffline && data.medidoresOffline.length > 0 && (
+          <div className="bg-white rounded-2xl border border-red-100 p-6 shadow-sm mb-8">
+            <div className="flex items-center gap-3 mb-5">
+              <div className="bg-red-50 p-2.5 rounded-xl border border-red-100">
+                <AlertTriangle className="w-5 h-5 text-red-600" />
+              </div>
+              <div>
+                <h2 className="text-lg font-semibold text-gray-900">Medidores sem comunicação</h2>
+                <p className="text-sm text-gray-500 mt-0.5">
+                  Leitura perdida agora vira lacuna no fechamento do mês
+                </p>
+              </div>
+            </div>
+            <div className="divide-y divide-gray-100">
+              {data.medidoresOffline.map(m => (
+                <div key={m.id} className="flex items-center justify-between py-2.5">
+                  <div>
+                    <p className="text-sm font-medium text-gray-900">{m.storeNome || 'Sem loja vinculada'}</p>
+                    <p className="text-xs text-gray-500">{m.numeroSerie}</p>
+                  </div>
+                  <span className="text-sm text-red-600 font-medium">{desdeQuando(m.lastSeen)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {erro && (
+          <div className="bg-red-50 border border-red-200 rounded-2xl p-5 mb-6 flex items-center gap-3">
+            <AlertTriangle className="w-5 h-5 text-red-600 shrink-0" />
+            <p className="text-red-700 text-sm font-medium">{erro}</p>
+          </div>
+        )}
 
         <div className="bg-white rounded-2xl border border-gray-100 p-6 shadow-sm">
           <div className="flex items-center justify-between mb-6">

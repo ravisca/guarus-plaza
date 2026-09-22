@@ -13,7 +13,7 @@
 
 services:
   postgres:
-    image: timescale/timescaledb:latest-pg16
+    image: timescale/timescaledb:2.17.2-pg16
     environment:
       POSTGRES_DB: guarus_energy
       POSTGRES_USER: ${DB_USER:-guarus}
@@ -26,6 +26,53 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+
+  # Backup do banco.
+  #
+  # Até aqui o volume `pgdata` era a ÚNICA cópia dos dados — sem dump, sem
+  # retenção, sem restauração testada. E esse banco guarda o histórico de
+  # leituras que sustenta toda fatura já emitida: perder o volume é perder a
+  # base de cálculo de todas as cobranças, sem trilha para reconstituir uma
+  # contestação.
+  #
+  # ATENÇÃO: isto é metade da solução. O volume `pgbackups` vive na MESMA VPS
+  # que o `pgdata` — protege contra `DROP TABLE` e migration destrutiva, não
+  # contra perder o servidor. A cópia para fora da VPS continua sendo um passo
+  # operacional (ver INF-05 no MELHORIAS.md).
+  backup:
+    image: timescale/timescaledb:2.17.2-pg16
+    environment:
+      - PGPASSWORD=${DB_PASSWORD}
+      - PGUSER=${DB_USER:-guarus}
+      - RETENCAO_DIAS=${BACKUP_RETENCAO_DIAS:-30}
+      - TZ=America/Sao_Paulo
+    volumes:
+      - pgbackups:/backups
+    depends_on:
+      postgres:
+        condition: service_healthy
+    entrypoint:
+      - sh
+      - -c
+      - |
+        mkdir -p /backups
+        echo "[BACKUP] ativo — retenção de $$RETENCAO_DIAS dias"
+        while true; do
+          ARQ="/backups/guarus_energy-$$(date +%Y%m%d-%H%M%S).sql.gz"
+          # Grava com outro nome e só renomeia no fim: um dump interrompido no
+          # meio da escrita ficaria parecendo um backup íntegro, e a hora de
+          # descobrir isso seria a hora da restauração.
+          if pg_dump -h postgres -d guarus_energy | gzip > "$$ARQ.parcial"; then
+            mv "$$ARQ.parcial" "$$ARQ"
+            echo "[BACKUP] $$ARQ ($$(du -h "$$ARQ" | cut -f1))"
+          else
+            rm -f "$$ARQ.parcial"
+            echo "[BACKUP] FALHOU em $$(date -Is)"
+          fi
+          find /backups -name '*.sql.gz' -mtime +$$RETENCAO_DIAS -delete
+          sleep 86400
+        done
+    restart: unless-stopped
 
   # Sincroniza o schema antes da API subir.
   #
@@ -65,6 +112,10 @@ services:
       - -c
       - |
         npm run db:push -- --force
+        # Hypertable, compressão e retenção. Idempotente: pode rodar a cada
+        # deploy. Nunca derruba o deploy — sem Timescale o sistema funciona,
+        # só degrada com o volume. Ver TIMESCALE_* no MELHORIAS.md (QUA-02).
+        npm run db:timescale || echo "[migrate] timescale não configurado — seguindo"
         if [ "$$RUN_SEED" = "1" ]; then
           echo "[migrate] RUN_SEED=1 — populando o banco"
           # O seed é opcional e não idempotente: num banco já populado ele falha
@@ -92,6 +143,10 @@ services:
       - PORT=3000
       - HOST=0.0.0.0
       - CORS_ORIGIN=${CORS_ORIGIN:-*}
+      # Faixas privadas onde nginx e Traefik vivem. Sem isto o `request.ip` é o
+      # IP do nginx para todo mundo, e tanto o rate limit quanto o freio de
+      # login passam a valer para o shopping inteiro de uma vez só.
+      - TRUST_PROXY=${TRUST_PROXY:-127.0.0.1, ::1, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, fc00::/7}
       # Fuso do shopping. Sem isto o container roda em UTC e o mês de faturamento
       # começava às 21h do último dia do mês anterior, em horário de Brasília.
       - TZ=America/Sao_Paulo
@@ -141,3 +196,4 @@ services:
 
 volumes:
   pgdata:
+  pgbackups:

@@ -16,7 +16,10 @@ services:
     image: eclipse-mosquitto:2
     container_name: guarus-mosquitto
     ports:
-      - "1883:1883"
+      # Só loopback. Publicado em 0.0.0.0, este broker aceitava conexão anônima
+      # de qualquer máquina da rede — e quem publica em `konect/+/readings`
+      # altera o consumo que vira fatura (SEC-03).
+      - "127.0.0.1:1883:1883"
     volumes:
       - ./mosquitto/config:/mosquitto/config
       - ./mosquitto/data:/mosquitto/data
@@ -27,11 +30,18 @@ services:
     container_name: guarus-agent
     environment:
       - MQTT_BROKER=mqtt://mosquitto:1883
-      - API_KEY=guarus-local-agent-2026
+      # Sem valor no arquivo. A chave que estava escrita aqui está publicada num
+      # repositório público (SEC-02). Defina AGENT_API_KEY no `.env` da raiz — o
+      # `?err` faz o compose recusar subir sem ela, em vez de usar um default
+      # silencioso.
+      - API_KEY=${AGENT_API_KEY:?defina AGENT_API_KEY no .env (use o mesmo valor na VPS)}
       - LOCAL_PORT=9100
+      - WS_PORT=9200
     ports:
-      - "9100:9100"
-      - "9200:9200"
+      # Só loopback: em ambiente de desenvolvimento não há por que expor o
+      # buffer de leituras e o WebSocket do agent para a rede inteira.
+      - "127.0.0.1:9100:9100"
+      - "127.0.0.1:9200:9200"
     depends_on:
       - mosquitto
     volumes:

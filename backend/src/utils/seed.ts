@@ -1,6 +1,28 @@
+import { randomBytes } from 'node:crypto'
 import { db } from '../config/database.js'
-import { tenants, stores, meters, users, tariffs } from '../config/schema.js'
+import { tenants, stores, meters, users, tariffs, userStores } from '../config/schema.js'
 import bcrypt from 'bcrypt'
+
+/**
+ * Senha inicial de um usuário do seed.
+ *
+ * O seed gravava `admin123` e `lojista123` fixos no código — e essas senhas
+ * estão publicadas no README de um repositório público. Um ambiente novo já
+ * nascia com credencial conhecida, e a de produção ficou ativa por semanas
+ * porque a API não tem rota de troca de senha.
+ *
+ * Agora: se a variável não vier definida, sorteia uma senha e a imprime **uma
+ * única vez** no log de quem rodou o seed. Não dá para vazar por commit o que
+ * não está no código.
+ */
+function senhaInicial(variavel: string): { senha: string; sorteada: boolean } {
+  const informada = process.env[variavel]
+  if (informada && informada.length > 0) return { senha: informada, sorteada: false }
+  // base64url de 12 bytes = 16 caracteres, sem ambiguidade de encoding.
+  return { senha: randomBytes(12).toString('base64url'), sorteada: true }
+}
+
+const credenciaisSorteadas: string[] = []
 
 async function seed() {
   console.log('Seeding database...')
@@ -12,7 +34,8 @@ async function seed() {
     status: 'ativo',
   }).returning()
 
-  const adminHash = await bcrypt.hash('admin123', 12)
+  const admin = senhaInicial('SEED_ADMIN_PASSWORD')
+  const adminHash = await bcrypt.hash(admin.senha, 12)
   await db.insert(users).values({
     tenantId: adminTenant.id,
     email: 'admin@guarusplaza.com.br',
@@ -20,6 +43,9 @@ async function seed() {
     role: 'admin',
     nome: 'Administrador',
   })
+  if (admin.sorteada) {
+    credenciaisSorteadas.push(`admin@guarusplaza.com.br  ${admin.senha}`)
+  }
 
   const storeNames = [
     { nome: 'Loja 01 - Roupas', numero: '001' },
@@ -60,14 +86,20 @@ async function seed() {
       status: 'online',
     })
 
-    const lojistaHash = await bcrypt.hash('lojista123', 12)
-    await db.insert(users).values({
+    const lojista = senhaInicial('SEED_LOJISTA_PASSWORD')
+    const lojistaHash = await bcrypt.hash(lojista.senha, 12)
+    const [lojistaUser] = await db.insert(users).values({
       tenantId: tenant.id,
       email: `loja${i + 1}@example.com`,
       senhaHash: lojistaHash,
       role: 'lojista',
       nome: `Lojista ${storeNames[i].numero}`,
-    })
+    }).returning()
+    // O acesso é pelo vínculo explícito, não pelo inquilino.
+    await db.insert(userStores).values({ userId: lojistaUser.id, storeId: store.id, vinculadoPor: 'seed' })
+    if (lojista.sorteada) {
+      credenciaisSorteadas.push(`loja${i + 1}@example.com          ${lojista.senha}`)
+    }
 
     console.log(`  Created store: ${storeNames[i].nome}`)
   }
@@ -78,6 +110,19 @@ async function seed() {
   })
 
   console.log('Seed completed!')
+
+  if (credenciaisSorteadas.length > 0) {
+    console.log('')
+    console.log('  ┌─────────────────────────────────────────────────────────────┐')
+    console.log('  │  SENHAS SORTEADAS — anote agora. Não são exibidas de novo.  │')
+    console.log('  └─────────────────────────────────────────────────────────────┘')
+    for (const linha of credenciaisSorteadas) console.log(`    ${linha}`)
+    console.log('')
+    console.log('  Para definir as senhas em vez de sortear, use SEED_ADMIN_PASSWORD')
+    console.log('  e SEED_LOJISTA_PASSWORD. Para trocar depois: npm run set-password.')
+    console.log('')
+  }
+
   process.exit(0)
 }
 

@@ -1,14 +1,47 @@
 import mqtt from 'mqtt'
 import WebSocket, { WebSocketServer } from 'ws'
-import { writeFileSync, readFileSync, readdirSync, existsSync, mkdirSync, unlinkSync } from 'fs'
+import { writeFileSync, readFileSync, readdirSync, existsSync, mkdirSync, unlinkSync, renameSync } from 'fs'
 import { join } from 'path'
 import http from 'http'
+import { createHash, timingSafeEqual } from 'crypto'
+
+/**
+ * Compara segredo em tempo constante. O SHA-256 antes iguala o comprimento —
+ * `timingSafeEqual` lança exceção com buffers de tamanhos diferentes.
+ */
+function chaveConfere(recebida: unknown, esperada: string): boolean {
+  if (typeof recebida !== 'string' || esperada.length === 0) return false
+  const a = createHash('sha256').update(recebida).digest()
+  const b = createHash('sha256').update(esperada).digest()
+  return timingSafeEqual(a, b)
+}
 
 const MQTT_BROKER = process.env.MQTT_BROKER || 'mqtt://localhost:1883'
-const VPS_URL = process.env.VPS_URL || 'wss://dashboard.guarusplaza.com.br/ws/agent'
-const API_KEY = process.env.API_KEY || 'guarus-local-agent-2026'
 const LOCAL_PORT = Number(process.env.LOCAL_PORT) || 9100
+const WS_PORT = Number(process.env.WS_PORT) || 9200
 const QUEUE_DIR = join(process.cwd(), 'queue')
+
+/**
+ * Chave que autentica quem puxa as leituras pelo WebSocket.
+ *
+ * O default era `guarus-local-agent-2026`, escrito aqui e no `docker-compose.yml`
+ * de um repositório **público**. Combinado com o firewall desligado no servidor
+ * do shopping, qualquer máquina da rede local se autenticava e lia o buffer.
+ *
+ * Falhar no boot é proposital: o default silencioso era o pior dos mundos —
+ * parecia funcionar, com a chave que está publicada na internet.
+ */
+const API_KEY = process.env.API_KEY || ''
+if (!API_KEY) {
+  console.error('[AGENT] API_KEY não definida. O agent não sobe sem ela.')
+  console.error('[AGENT] Use o mesmo valor de AGENT_API_KEY configurado na VPS.')
+  process.exit(1)
+}
+if (API_KEY === 'guarus-local-agent-2026') {
+  console.error('[AGENT] API_KEY é a chave de exemplo que vazou no repositório público.')
+  console.error('[AGENT] Gere uma nova e atualize os dois lados (agent e VPS).')
+  process.exit(1)
+}
 
 interface Reading {
   device: string
@@ -20,10 +53,20 @@ interface Reading {
     power: number
     power_factor: number
   }
+  /**
+   * Marca de posição no buffer, atribuída aqui. A VPS devolve a maior marca que
+   * conseguiu gravar e só o que está abaixo dela é removido.
+   *
+   * Existe porque confirmar por contagem é errado: se o buffer transbordasse
+   * entre o envio e a confirmação, `splice(0, count)` removia leituras que a VPS
+   * nunca recebeu.
+   */
+  _seq?: number
 }
 
 const buffer: Reading[] = []
 const MAX_BUFFER = 5000
+let proximoSeq = 1
 let vpsConnected = false
 let mqttConnected = false
 
@@ -33,31 +76,75 @@ if (!existsSync(QUEUE_DIR)) {
 
 // ─── Local Queue (offline resilience) ────────────────────────────
 
+let contadorDeLote = 0
+
 function saveToQueue(data: Reading[]) {
-  const filename = join(QUEUE_DIR, `batch-${Date.now()}.json`)
+  // O nome levava só `Date.now()`: dois transbordos no mesmo milissegundo
+  // gravavam no mesmo arquivo e o segundo apagava o primeiro.
+  const filename = join(QUEUE_DIR, `batch-${Date.now()}-${contadorDeLote++}.json`)
   writeFileSync(filename, JSON.stringify(data))
   console.log(`[QUEUE] Saved ${data.length} readings to disk`)
 }
 
-function loadFromQueue(): Reading[] {
-  const loaded: Reading[] = []
+/**
+ * Devolve ao buffer o que transbordou para o disco.
+ *
+ * A função que fazia isto existia desde o início e **nunca era chamada em lugar
+ * nenhum**. Na prática: com a VPS fora do ar por mais de uma hora, o buffer
+ * enchia, o excedente ia para `queue/` e ficava lá para sempre. Leitura perdida
+ * vira lacuna no fechamento do mês, que trava a fatura em `requer_revisao`.
+ *
+ * Só drena com o buffer abaixo da metade, para não voltar a transbordar na
+ * mesma respiração.
+ */
+function drenarFila() {
+  if (buffer.length >= MAX_BUFFER / 2) return
+
+  let arquivos: string[]
   try {
-    const files = readdirSync(QUEUE_DIR).filter(f => f.endsWith('.json')).sort()
-    for (const file of files) {
-      const data = JSON.parse(readFileSync(join(QUEUE_DIR, file), 'utf-8'))
-      loaded.push(...data)
-      unlinkSync(join(QUEUE_DIR, file))
+    arquivos = readdirSync(QUEUE_DIR).filter(f => f.endsWith('.json')).sort()
+  } catch {
+    return
+  }
+
+  let recuperadas = 0
+  for (const arquivo of arquivos) {
+    if (buffer.length >= MAX_BUFFER / 2) break
+    const caminho = join(QUEUE_DIR, arquivo)
+
+    try {
+      const dados = JSON.parse(readFileSync(caminho, 'utf-8'))
+      if (Array.isArray(dados)) {
+        for (const leitura of dados) {
+          buffer.push({ ...leitura, _seq: proximoSeq++ })
+          recuperadas++
+        }
+      }
+      unlinkSync(caminho)
+    } catch (err: any) {
+      // Arquivo ilegível não pode bloquear a fila nem ser apagado em silêncio:
+      // sai do caminho com outro nome, para quem for investigar.
+      console.error(`[QUEUE] ${arquivo} ilegível (${err.message}) — renomeado para .bad`)
+      try { renameSync(caminho, `${caminho}.bad`) } catch {}
     }
-    if (loaded.length > 0) {
-      console.log(`[QUEUE] Loaded ${loaded.length} readings from disk`)
-    }
-  } catch {}
-  return loaded
+  }
+
+  if (recuperadas > 0) {
+    console.log(`[QUEUE] Recuperadas ${recuperadas} leituras do disco. Buffer: ${buffer.length}`)
+  }
 }
 
 // ─── MQTT (collects from Kron Konect meters) ─────────────────────
 
-const mqttClient = mqtt.connect(MQTT_BROKER)
+// Credenciais opcionais: o broker de desenvolvimento é anônimo, o do shopping
+// não é (mosquitto/config/mosquitto.producao.conf).
+const MQTT_USER = process.env.MQTT_USER || ''
+const MQTT_PASS = process.env.MQTT_PASS || ''
+
+const mqttClient = mqtt.connect(
+  MQTT_BROKER,
+  MQTT_USER ? { username: MQTT_USER, password: MQTT_PASS } : {},
+)
 
 mqttClient.on('connect', () => {
   mqttConnected = true
@@ -79,7 +166,7 @@ mqttClient.on('message', (topic: string, message: Buffer) => {
         const overflow = buffer.splice(0, 500)
         saveToQueue(overflow)
       }
-      buffer.push(data)
+      buffer.push({ ...data, _seq: proximoSeq++ })
       console.log(`[MQTT] Reading from ${data.device}. Buffer: ${buffer.length}`)
     }
   } catch (err: any) {
@@ -123,7 +210,7 @@ localServer.listen(LOCAL_PORT, () => {
 
 // ─── WebSocket (VPS connects here to pull data) ──────────────────
 
-const wss = new WebSocketServer({ port: 9200 })
+const wss = new WebSocketServer({ port: WS_PORT })
 
 wss.on('connection', (ws, req) => {
   const ip = req.socket.remoteAddress
@@ -135,7 +222,9 @@ wss.on('connection', (ws, req) => {
 
       switch (msg.type) {
         case 'auth': {
-          if (msg.apiKey === API_KEY) {
+          // Tempo constante: `===` para na primeira diferença, e esse tempo
+          // conta ao atacante quantos caracteres iniciais ele já acertou.
+          if (chaveConfere(msg.apiKey, API_KEY)) {
             (ws as any).authenticated = true
             ws.send(JSON.stringify({ type: 'auth', status: 'ok' }))
             console.log('[WS] Client authenticated')
@@ -175,11 +264,26 @@ wss.on('connection', (ws, req) => {
 
         case 'ack': {
           if (!(ws as any).authenticated) return
-          const count = msg.count || 0
-          if (count > 0) {
-            buffer.splice(0, count)
-            console.log(`[WS] VPS acknowledged ${count} readings. Buffer: ${buffer.length}`)
+          const antes = buffer.length
+
+          if (typeof msg.ateSeq === 'number') {
+            // Remove exatamente o que a VPS confirmou ter gravado, e nada mais.
+            const mantidas = buffer.filter(r => (r._seq ?? 0) > msg.ateSeq)
+            buffer.length = 0
+            for (const leitura of mantidas) buffer.push(leitura)
+          } else {
+            // Agent falando com uma VPS antiga, que só manda contagem.
+            const count = msg.count || 0
+            if (count > 0) buffer.splice(0, count)
           }
+
+          const removidas = antes - buffer.length
+          if (removidas > 0) {
+            console.log(`[WS] VPS acknowledged ${removidas} readings. Buffer: ${buffer.length}`)
+          }
+
+          // Abriu espaço: é a hora de trazer de volta o que foi para o disco.
+          drenarFila()
           break
         }
 
@@ -198,8 +302,14 @@ wss.on('connection', (ws, req) => {
   })
 })
 
+// Antes de qualquer coisa: o que ficou no disco de uma execução anterior volta
+// para o buffer, em vez de ficar esquecido lá.
+drenarFila()
+
 console.log(`[AGENT] Starting...`)
 console.log(`  MQTT: ${MQTT_BROKER}`)
-console.log(`  VPS WebSocket: ${VPS_URL}`)
 console.log(`  Local HTTP: http://localhost:${LOCAL_PORT}`)
-console.log(`  WebSocket Server: ws://localhost:9200`)
+// `VPS_URL` saiu daqui: era código morto que anunciava no log uma conexão que
+// nunca acontece — o fluxo é o inverso, a VPS é que conecta neste servidor.
+// Quem lia essa linha diagnosticava a sincronização pelo lado errado.
+console.log(`  WebSocket Server (a VPS conecta aqui): ws://0.0.0.0:${WS_PORT}`)

@@ -62,12 +62,29 @@ npm install
 npm run dev          # Inicia em http://localhost:5173
 ```
 
-## Credenciais de Teste
+## Credenciais
 
-| Usuário | Senha | Role |
-|---|---|---|
-| admin@guarusplaza.com.br | admin123 | admin |
-| loja1@example.com | lojista123 | lojista |
+O seed **não grava mais senha fixa**. Ao rodar `npm run db:seed`, ele sorteia uma senha
+para cada usuário e a imprime **uma única vez** no terminal — anote naquele momento.
+
+Usuários criados:
+
+| Usuário | Role |
+|---|---|
+| admin@guarusplaza.com.br | admin |
+| loja1@example.com … loja5@example.com | lojista |
+
+Para definir as senhas em vez de sortear:
+
+```bash
+SEED_ADMIN_PASSWORD='...' SEED_LOJISTA_PASSWORD='...' npm run db:seed
+```
+
+Para trocar depois: `npm run set-password` (mínimo de 10 caracteres).
+
+> As senhas anteriores (`admin123` / `lojista123`) estavam escritas aqui, num repositório
+> público, e ficaram ativas em produção. Não repita esse padrão: nenhuma senha real entra
+> neste arquivo.
 
 ## Deploy em Produção
 
@@ -92,8 +109,9 @@ do Coolify no container `migrate`:
 npm run db:seed
 ```
 
-E **troque a senha do admin logo em seguida** — a das credenciais de teste acima é
-pública.
+Anote as senhas sorteadas que ele imprime — elas não são exibidas de novo. Para trocar
+depois, `SET_PASSWORD_EMAIL` + `SET_PASSWORD_VALUE` no serviço `migrate` e redeploy
+(limpando `SET_PASSWORD_VALUE` em seguida, para não deixar senha em texto no painel).
 
 ### Servidor do Shopping
 
