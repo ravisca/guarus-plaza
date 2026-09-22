@@ -28,6 +28,42 @@ const POTENCIA_MAX_KW = Number(process.env.POTENCIA_MAX_KW || 500)
 /** Acima disso, considera-se que houve queda de coleta. */
 export const LACUNA_MAX_MIN = Number(process.env.LACUNA_MAX_MIN || 30)
 
+/** kWh/min que um ponto de medição pode acumular no melhor caso. */
+const TETO_POR_MINUTO = POTENCIA_MAX_KW / 60
+
+/**
+ * Monta a lista de medidores para o `= ANY(...)` da query.
+ *
+ * O template `sql` do drizzle envia um array JS como parâmetro único, o que o
+ * Postgres recusa em `= ANY(...)`. Os ids vêm do próprio banco, mas são
+ * validados como UUID antes de entrar na query — nada aqui aceita entrada
+ * externa sem passar por esta checagem.
+ */
+function listaDeMedidores(meterIds: string[], origem: string) {
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+  const idsValidos = meterIds.filter((id) => UUID_RE.test(id))
+  if (idsValidos.length !== meterIds.length) {
+    throw new Error(`identificador de medidor inválido em ${origem}`)
+  }
+  return sql.raw(`ARRAY['${idsValidos.join("','")}']::uuid[]`)
+}
+
+/**
+ * Ano e mês corrente **no fuso do shopping**, não no fuso do processo.
+ *
+ * O container roda em UTC: `new Date().getMonth()` vira o mês errado nas três
+ * primeiras horas de cada dia 1º. Quem responde é o Postgres, que tem a base de
+ * fusos completa.
+ */
+export async function mesCorrente(): Promise<{ ano: number; mes: number }> {
+  const [r] = await db.execute<{ ano: number; mes: number }>(sql`
+    SELECT
+      EXTRACT(YEAR  FROM (now() AT TIME ZONE ${FUSO_LOCAL}))::int AS ano,
+      EXTRACT(MONTH FROM (now() AT TIME ZONE ${FUSO_LOCAL}))::int AS mes
+  `)
+  return { ano: Number(r.ano), mes: Number(r.mes) }
+}
+
 export interface ConsumoMedido {
   consumoKwh: number
   amostras: number
@@ -36,6 +72,12 @@ export interface ConsumoMedido {
   lacunaMaiorMin: number
   leituraInicial: number | null
   leituraFinal: number | null
+  /**
+   * Leituras em que o próprio coletor marcou queda do acumulador (medidor
+   * zerado ou trocado). É informação diferente de `anomaliasDescartadas`: esta
+   * vem do equipamento, aquela é dedução do cálculo.
+   */
+  quedasDeAcumulador: number
 }
 
 const VAZIO: ConsumoMedido = {
@@ -45,6 +87,7 @@ const VAZIO: ConsumoMedido = {
   lacunaMaiorMin: 0,
   leituraInicial: null,
   leituraFinal: null,
+  quedasDeAcumulador: 0,
 }
 
 /**
@@ -81,29 +124,20 @@ export async function medirConsumo(
 ): Promise<ConsumoMedido> {
   if (meterIds.length === 0) return { ...VAZIO }
 
-  // kWh/min que um ponto de medição pode acumular no melhor caso.
-  const tetoPorMinuto = POTENCIA_MAX_KW / 60
+  const tetoPorMinuto = TETO_POR_MINUTO
 
   // O driver postgres.js não aceita Date como parâmetro; vai como ISO e o cast
   // para `timestamp` (sem fuso) preserva o valor literal, que já está em UTC.
   const iniIso = inicio.toISOString()
   const fimIso = fim.toISOString()
 
-  // O template `sql` do drizzle envia um array JS como parâmetro único, o que o
-  // Postgres recusa em `= ANY(...)`. Os ids vêm do próprio banco, mas são
-  // validados como UUID antes de entrar na query — nada aqui aceita entrada
-  // externa sem passar por esta checagem.
-  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-  const idsValidos = meterIds.filter((id) => UUID_RE.test(id))
-  if (idsValidos.length !== meterIds.length) {
-    throw new Error('identificador de medidor inválido em medirConsumo')
-  }
-  const listaIds = sql.raw(`ARRAY['${idsValidos.join("','")}']::uuid[]`)
+  const listaIds = listaDeMedidores(meterIds, 'medirConsumo')
 
   const [r] = await db.execute<{
     consumo: string | null
     amostras: string
     anomalias: string
+    quedas: string
     maior_gap: string | null
     leitura_inicial: number | null
     leitura_final: number | null
@@ -115,6 +149,7 @@ export async function medirConsumo(
         meter_id,
         time,
         kwh,
+        anomalia,
         LAG(kwh)  OVER (PARTITION BY meter_id ORDER BY time) AS kwh_ant,
         LAG(time) OVER (PARTITION BY meter_id ORDER BY time) AS time_ant
       FROM readings
@@ -142,7 +177,8 @@ export async function medirConsumo(
       SELECT
         MIN(time) AS primeira_em,
         MAX(time) AS ultima_em,
-        COUNT(*)  AS amostras
+        COUNT(*)  AS amostras,
+        COUNT(*) FILTER (WHERE anomalia IS NOT NULL) AS quedas
       FROM base
     )
     SELECT
@@ -152,6 +188,7 @@ export async function medirConsumo(
       (SELECT COALESCE(MAX(gap_min), 0) FROM classificado)                           AS maior_gap,
       (SELECT kwh FROM base WHERE time = (SELECT primeira_em FROM extremos) LIMIT 1) AS leitura_inicial,
       (SELECT kwh FROM base WHERE time = (SELECT ultima_em   FROM extremos) LIMIT 1) AS leitura_final,
+      (SELECT quedas FROM extremos)                                                  AS quedas,
       (SELECT primeira_em FROM extremos)                                             AS primeira_em,
       (SELECT ultima_em   FROM extremos)                                             AS ultima_em
   `)
@@ -172,6 +209,7 @@ export async function medirConsumo(
     lacunaMaiorMin: Math.round(Math.max(Number(r.maior_gap || 0), gapInicio, gapFim)),
     leituraInicial: r.leitura_inicial != null ? Number(r.leitura_inicial) : null,
     leituraFinal: r.leitura_final != null ? Number(r.leitura_final) : null,
+    quedasDeAcumulador: Number(r.quedas || 0),
   }
 }
 
@@ -220,4 +258,269 @@ export async function faixasTarifarias(inicio: Date, fim: Date): Promise<FaixaTa
   }
 
   return faixas
+}
+
+export interface ConsumoValorado extends ConsumoMedido {
+  valorTotal: number
+  /** Preço médio efetivamente pago por kWh no período. */
+  tarifaKwh: number
+  /** Quantas faixas de tarifa incidiram sobre o período. */
+  faixas: number
+}
+
+/**
+ * Mede e valora o consumo de um conjunto de medidores.
+ *
+ * Existe para que o fechamento da fatura e a estimativa que o lojista vê na
+ * tela usem **o mesmo código**. Antes, a tela do lojista multiplicava o consumo
+ * por um `0.85` literal e o fechamento consultava a tabela de tarifas — dois
+ * números diferentes para a mesma pergunta, e o lojista descobrindo isso ao
+ * receber a fatura.
+ *
+ * Sem tarifa vigente o valor é zero: quem chama decide o que fazer com isso (o
+ * fechamento trava o ciclo em `requer_revisao`; a tela informa que falta
+ * tarifa). Nunca emitir valor sobre premissa inventada.
+ */
+export async function valorarConsumo(
+  meterIds: string[],
+  inicio: Date,
+  fim: Date,
+  /** Faixas já calculadas, para não repetir a consulta a cada loja do fechamento. */
+  faixasPrecalculadas?: FaixaTarifaria[],
+): Promise<ConsumoValorado> {
+  const periodo = await medirConsumo(meterIds, inicio, fim)
+  const faixas = faixasPrecalculadas ?? await faixasTarifarias(inicio, fim)
+
+  if (faixas.length === 0) {
+    return { ...periodo, valorTotal: 0, tarifaKwh: 0, faixas: 0 }
+  }
+
+  if (faixas.length === 1) {
+    return {
+      ...periodo,
+      valorTotal: periodo.consumoKwh * faixas[0].valorKwh,
+      tarifaKwh: faixas[0].valorKwh,
+      faixas: 1,
+    }
+  }
+
+  // Mais de uma vigência no período: cada trecho é medido e valorado com a
+  // tarifa dele, para que uma tarifa que passe a valer no dia 20 não seja
+  // cobrada sobre o consumo dos dias 1 a 19.
+  let valorTotal = 0
+  for (const faixa of faixas) {
+    const parcial = await medirConsumo(meterIds, faixa.inicio, faixa.fim)
+    valorTotal += parcial.consumoKwh * faixa.valorKwh
+  }
+
+  const tarifaKwh = periodo.consumoKwh > 0
+    ? valorTotal / periodo.consumoKwh
+    : faixas[faixas.length - 1].valorKwh
+
+  return { ...periodo, valorTotal, tarifaKwh, faixas: faixas.length }
+}
+
+export interface PontoDaSerie {
+  /** Início do balde, como instante absoluto. */
+  em: Date
+  kwh: number
+  tensaoMedia: number | null
+  amostras: number
+}
+
+/** Baldes aceitos na série. Restrito de propósito: vira argumento de SQL. */
+export type PassoDaSerie = 'hour' | 'day'
+
+/**
+ * Série de consumo por balde de tempo, para os gráficos.
+ *
+ * Usa a mesma regra do faturamento — soma de incrementos positivos com teto
+ * físico — em vez de devolver leitura crua para o navegador subtrair. A conta
+ * feita no cliente estava errada de três formas ao mesmo tempo: ordem invertida,
+ * acumuladores de medidores diferentes misturados, e teto de 1000 linhas.
+ *
+ * Os baldes são truncados no fuso do shopping: "hora cheia" é hora local, não
+ * hora UTC.
+ */
+export async function serieConsumo(
+  meterIds: string[],
+  inicio: Date,
+  fim: Date,
+  passo: PassoDaSerie = 'hour',
+): Promise<PontoDaSerie[]> {
+  if (meterIds.length === 0) return []
+
+  const listaIds = listaDeMedidores(meterIds, 'serieConsumo')
+  const iniIso = inicio.toISOString()
+  const fimIso = fim.toISOString()
+
+  const linhas = await db.execute<{
+    em: Date
+    kwh: string | null
+    tensao: string | null
+    amostras: string
+  }>(sql`
+    WITH base AS (
+      SELECT
+        time,
+        kwh,
+        voltage,
+        LAG(kwh)  OVER (PARTITION BY meter_id ORDER BY time) AS kwh_ant,
+        LAG(time) OVER (PARTITION BY meter_id ORDER BY time) AS time_ant
+      FROM readings
+      WHERE meter_id = ANY(${listaIds})
+        AND time >= ${iniIso}::timestamptz AND time < ${fimIso}::timestamptz
+        AND kwh IS NOT NULL
+    ),
+    marcado AS (
+      SELECT
+        (date_trunc(${passo}, time AT TIME ZONE ${FUSO_LOCAL}) AT TIME ZONE ${FUSO_LOCAL}) AS balde,
+        voltage,
+        CASE
+          WHEN kwh_ant IS NULL THEN 0
+          WHEN kwh - kwh_ant < 0 THEN 0
+          WHEN kwh - kwh_ant > ${TETO_POR_MINUTO} * GREATEST(EXTRACT(EPOCH FROM (time - time_ant)) / 60.0, 0.0001) THEN 0
+          ELSE kwh - kwh_ant
+        END AS delta
+      FROM base
+    )
+    SELECT
+      balde                        AS em,
+      COALESCE(SUM(delta), 0)      AS kwh,
+      AVG(voltage)                 AS tensao,
+      COUNT(*)                     AS amostras
+    FROM marcado
+    GROUP BY balde
+    ORDER BY balde
+  `)
+
+  return linhas.map((l) => ({
+    em: new Date(l.em),
+    kwh: Number(l.kwh || 0),
+    tensaoMedia: l.tensao != null ? Number(l.tensao) : null,
+    amostras: Number(l.amostras),
+  }))
+}
+
+/**
+ * Consumo acumulado FORA do horário de funcionamento da loja.
+ *
+ * É o que sustenta o alerta de desperdício fora do horário — um tipo que a tela
+ * oferecia, o banco aceitava e o verificador simplesmente não implementava: o
+ * lojista configurava um alerta que nunca ia disparar, e não tinha como saber.
+ *
+ * A janela é comparada em hora local do shopping. Lojas que fecham depois da
+ * meia-noite (abertura > fechamento) são tratadas como intervalo que atravessa
+ * o dia.
+ */
+export async function consumoForaDoHorario(
+  meterIds: string[],
+  inicio: Date,
+  fim: Date,
+  abertura: string,
+  fechamento: string,
+): Promise<number> {
+  if (meterIds.length === 0) return 0
+
+  const listaIds = listaDeMedidores(meterIds, 'consumoForaDoHorario')
+  const atravessaMeiaNoite = abertura > fechamento
+
+  const [r] = await db.execute<{ consumo: string | null }>(sql`
+    WITH base AS (
+      SELECT
+        time,
+        kwh,
+        LAG(kwh)  OVER (PARTITION BY meter_id ORDER BY time) AS kwh_ant,
+        LAG(time) OVER (PARTITION BY meter_id ORDER BY time) AS time_ant
+      FROM readings
+      WHERE meter_id = ANY(${listaIds})
+        AND time >= ${inicio.toISOString()}::timestamptz
+        AND time <  ${fim.toISOString()}::timestamptz
+        AND kwh IS NOT NULL
+    ),
+    marcado AS (
+      SELECT
+        (time AT TIME ZONE ${FUSO_LOCAL})::time AS hora_local,
+        CASE
+          WHEN kwh_ant IS NULL THEN 0
+          WHEN kwh - kwh_ant < 0 THEN 0
+          WHEN kwh - kwh_ant > ${TETO_POR_MINUTO} * GREATEST(EXTRACT(EPOCH FROM (time - time_ant)) / 60.0, 0.0001) THEN 0
+          ELSE kwh - kwh_ant
+        END AS delta
+      FROM base
+    )
+    SELECT COALESCE(SUM(delta), 0) AS consumo
+    FROM marcado
+    WHERE ${atravessaMeiaNoite
+      ? sql`hora_local < ${abertura}::time AND hora_local >= ${fechamento}::time`
+      : sql`(hora_local < ${abertura}::time OR hora_local >= ${fechamento}::time)`}
+  `)
+
+  return Number(r?.consumo || 0)
+}
+
+export interface ConsumoDaLoja {
+  storeId: string
+  nome: string
+  kwh: number
+}
+
+/**
+ * Consumo por loja num período, em uma única query.
+ *
+ * O dashboard do admin usava `max(kwh) - min(kwh)` — o mesmo cálculo que o
+ * faturamento abandonou por produzir número errado com leitura corrompida,
+ * medidor zerado ou troca de equipamento. O painel mostrava um valor e a fatura
+ * outro, sem explicação disponível para quem perguntasse.
+ *
+ * Uma loja com mais de um medidor soma os medidores; medidor sem loja fica de
+ * fora (não há a quem atribuir).
+ */
+export async function consumoPorLoja(
+  inicio: Date,
+  fim: Date,
+  limite = 10,
+): Promise<ConsumoDaLoja[]> {
+  const linhas = await db.execute<{ store_id: string; nome: string; kwh: string | null }>(sql`
+    WITH base AS (
+      SELECT
+        m.store_id,
+        r.kwh,
+        LAG(r.kwh)  OVER (PARTITION BY r.meter_id ORDER BY r.time) AS kwh_ant,
+        LAG(r.time) OVER (PARTITION BY r.meter_id ORDER BY r.time) AS time_ant,
+        r.time
+      FROM readings r
+      JOIN meters m ON m.id = r.meter_id
+      WHERE m.store_id IS NOT NULL
+        AND r.time >= ${inicio.toISOString()}::timestamptz
+        AND r.time <  ${fim.toISOString()}::timestamptz
+        AND r.kwh IS NOT NULL
+    ),
+    marcado AS (
+      SELECT
+        store_id,
+        CASE
+          WHEN kwh_ant IS NULL THEN 0
+          WHEN kwh - kwh_ant < 0 THEN 0
+          WHEN kwh - kwh_ant > ${TETO_POR_MINUTO} * GREATEST(EXTRACT(EPOCH FROM (time - time_ant)) / 60.0, 0.0001) THEN 0
+          ELSE kwh - kwh_ant
+        END AS delta
+      FROM base
+    )
+    SELECT
+      s.id                     AS store_id,
+      s.nome                   AS nome,
+      COALESCE(SUM(mk.delta), 0) AS kwh
+    FROM marcado mk
+    JOIN stores s ON s.id = mk.store_id
+    GROUP BY s.id, s.nome
+    ORDER BY kwh DESC
+    LIMIT ${limite}
+  `)
+
+  return linhas.map((l) => ({
+    storeId: l.store_id,
+    nome: l.nome,
+    kwh: Number(l.kwh || 0),
+  }))
 }

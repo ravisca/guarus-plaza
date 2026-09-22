@@ -21,7 +21,6 @@ services:
     environment:
       - DATABASE_URL=postgresql://${DB_USER:-guarus}:${DB_PASSWORD}@postgres:5432/guarus_energy
       - JWT_SECRET=${JWT_SECRET}
-      - INGEST_API_KEY=${INGEST_API_KEY}
       - PORT=3000
       - HOST=0.0.0.0
       - CORS_ORIGIN=${CORS_ORIGIN:-*}

@@ -1,12 +1,14 @@
 import { useState } from 'react'
 import { useAuth } from '../hooks/useAuth'
 import { Link, useLocation } from 'react-router-dom'
-import { LayoutDashboard, Store, Cable, Receipt, LogOut, Zap, Menu, X, ChevronRight } from 'lucide-react'
+import { LayoutDashboard, Store, Cable, Receipt, LogOut, Zap, Menu, X, ChevronRight, Building2, DollarSign, KeyRound } from 'lucide-react'
 
 const adminLinks = [
   { to: '/admin', label: 'Dashboard', icon: LayoutDashboard },
   { to: '/admin/lojas', label: 'Lojas', icon: Store },
+  { to: '/admin/inquilinos', label: 'Lojistas e acessos', icon: Building2 },
   { to: '/admin/medidores', label: 'Medidores', icon: Cable },
+  { to: '/admin/tarifas', label: 'Tarifas', icon: DollarSign },
   { to: '/admin/faturamento', label: 'Faturamento', icon: Receipt },
 ]
 
@@ -82,6 +84,14 @@ export default function Sidebar() {
             <p className="text-sm font-medium text-gray-900 truncate">{user?.email}</p>
           </div>
         </div>
+        <Link
+          to="/trocar-senha"
+          onClick={() => setMobileOpen(false)}
+          className="flex items-center gap-2 text-gray-500 hover:text-gray-900 transition-colors text-sm w-full px-2 py-2 rounded-lg hover:bg-gray-50"
+        >
+          <KeyRound className="w-4 h-4" />
+          <span className="font-medium">Trocar senha</span>
+        </Link>
         <button
           onClick={logout}
           className="flex items-center gap-2 text-gray-500 hover:text-red-600 transition-colors text-sm w-full px-2 py-2 rounded-lg hover:bg-red-50"

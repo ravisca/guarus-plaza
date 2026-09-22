@@ -1,0 +1,111 @@
+name: CI
+
+# Toda a garantia de correção do faturamento dependia de alguém lembrar de rodar
+# um script à mão. Aqui ela passa a rodar sozinha, em push e em PR.
+
+on:
+  push:
+    branches: [main, 'deploy/**']
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        # Mesma imagem da produção: o cálculo de faturamento depende da base de
+        # fusos do Postgres e o teste confere limites de mês.
+        image: timescale/timescaledb:latest-pg16
+        env:
+          POSTGRES_DB: guarus_energy
+          POSTGRES_USER: guarus
+          POSTGRES_PASSWORD: guarus_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U guarus -d guarus_energy"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://guarus:guarus_ci@localhost:5432/guarus_energy
+      JWT_SECRET: chave-de-ci-com-mais-de-trinta-e-dois-caracteres
+      # O fuso do processo é justamente o que deslocava os limites do mês.
+      TZ: America/Sao_Paulo
+      FUSO_FATURAMENTO: America/Sao_Paulo
+      LOG_SILENCIOSO: '1'
+
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+        continue-on-error: true
+
+      - name: Schema
+        run: npm run db:push -- --force
+
+      - name: Teste de faturamento
+        run: npm run teste:faturamento
+
+      - name: Teste de autorização
+        run: npm run teste:autorizacao
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      # `npm run build` já roda `tsc` antes do vite — foi TS6133 no build que
+      # deixou o repositório original sem conseguir buildar.
+      - run: npm run build
+
+  agent:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: agent
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: agent/package-lock.json
+      - run: npm ci
+      - run: npx tsc --noEmit
+
+  collector:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      # O coletor é CommonJS sem build: o que dá para verificar é a sintaxe.
+      - run: node --check collector/index.js
