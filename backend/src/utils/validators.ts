@@ -61,6 +61,10 @@ export const createUserSchema = z.object({
 
 export const atualizarUsuarioSchema = z.object({
   nome: z.string().min(1).max(200).optional(),
+  // O e-mail é o login. Os acessos criados em lote nascem com um endereço
+  // derivado do nome da loja; trocar pelo e-mail real do lojista tem que ser
+  // possível sem recriar o usuário e perder os vínculos.
+  email: z.string().email().max(200).optional(),
   tenantId: z.string().uuid().nullable().optional(),
   whatsapp: z.string().max(20).nullable().optional(),
 })
@@ -91,7 +95,9 @@ export const createAlertSchema = z.object({
   storeId: z.string().uuid(),
   tipo: z.enum(['consumo_mensal', 'horario_sem_atividade', 'fator_potencia_baixo', 'tensao_fora_padrao']),
   limite: z.number().positive(),
-  canal: z.enum(['email', 'whatsapp']),
+  // 'painel' é o padrão: o aviso aparece na tela do lojista. E-mail só volta a
+  // ser oferecido quando houver SMTP configurado (ALERTA_EMAIL=1).
+  canal: z.enum(['painel', 'email', 'whatsapp']).default('painel'),
 })
 
 /** Alteração de alerta: `ativo` não estava em lugar nenhum, e o campo existe no banco. */

@@ -23,6 +23,19 @@ const TENSAO_NOMINAL = Number(process.env.TENSAO_NOMINAL || 220)
  */
 const JANELA_REENVIO_MS = Number(process.env.ALERTA_REENVIO_HORAS || 24) * 60 * 60 * 1000
 
+/**
+ * E-mail desligado por padrão: o alerta é visual, na tela do lojista.
+ *
+ * Não há SMTP configurado, então "enviar e-mail" hoje significa escrever no log
+ * do servidor uma mensagem que ninguém lê — a pior das duas opções, porque a
+ * tela promete um aviso que não chega. Com `ALERTA_EMAIL=1` e SMTP configurado,
+ * o envio volta sem mudar mais nada.
+ *
+ * O disparo é registrado em `alert_logs` nos dois casos: é dele que a tela tira
+ * "este alerta disparou, e quando".
+ */
+const ALERTA_EMAIL = process.env.ALERTA_EMAIL === '1' && !!process.env.SMTP_USER
+
 const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST || 'smtp.gmail.com',
   port: Number(process.env.SMTP_PORT) || 587,
@@ -220,14 +233,28 @@ export async function checkAlerts() {
       continue
     }
 
+    const [store] = await db.select().from(stores).where(eq(stores.id, check.storeId)).limit(1)
+    const storeName = store?.nome || 'Loja desconhecida'
+
+    // Alerta visual: uma linha por disparo, que a tela do lojista lê. Não depende
+    // de haver usuário vinculado — a loja pode ainda não ter lojista, e o
+    // histórico do disparo continua valendo para quem administra.
+    if (!ALERTA_EMAIL) {
+      await db.insert(alertLogs).values({
+        alertId: check.alertId,
+        canal: 'painel',
+        destinatario: 'painel',
+        mensagem: check.mensagem,
+      })
+      console.log(`[ALERT] ${storeName}: ${check.mensagem} → registrado no painel`)
+      continue
+    }
+
     // Todos os lojistas com acesso à loja, não só o primeiro. O destinatário era
     // resolvido por inquilino — o que, com as lojas de produção sob um único
     // inquilino, mandaria o alerta de uma loja para os lojistas de todas.
     const destinatarios = await usuariosDaLoja(check.storeId)
     if (destinatarios.length === 0) continue
-
-    const [store] = await db.select().from(stores).where(eq(stores.id, check.storeId)).limit(1)
-    const storeName = store?.nome || 'Loja desconhecida'
 
     let enviados = 0
     for (const user of destinatarios) {

@@ -19,3 +19,6 @@ graphify-out/
 
 # Saída da skill obsidian-sync — vault local, não versionado.
 Obsidian/
+
+# CSV de acessos gerado por `npm run criar:lojistas` — contém senha em texto.
+lojistas-*.csv

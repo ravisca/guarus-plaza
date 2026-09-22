@@ -32,7 +32,6 @@ jobs:
     env:
       DATABASE_URL: postgresql://guarus:guarus_ci@localhost:5432/guarus_energy
       JWT_SECRET: chave-de-ci-com-mais-de-trinta-e-dois-caracteres
-      INGEST_API_KEY: chave-de-ci-16-chars
       # O fuso do processo é justamente o que deslocava os limites do mês.
       TZ: America/Sao_Paulo
       FUSO_FATURAMENTO: America/Sao_Paulo

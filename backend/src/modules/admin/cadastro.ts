@@ -57,12 +57,16 @@ export async function cadastroRoutes(app: FastifyInstance) {
         emailContato: tenants.emailContato,
         whatsapp: tenants.whatsapp,
         status: tenants.status,
+        // Subconsulta escrita com SQL literal, de propósito: dentro de um `sql`
+        // de SELECT o drizzle renderiza a coluna SEM o nome da tabela, e
+        // `WHERE "store_id" = "id"` passa a comparar duas colunas da tabela do
+        // subselect — condição sempre falsa, contagem sempre zero, sem erro.
         lojas: sql<number>`(
-          SELECT count(*)::int FROM ${stores}
-          WHERE ${stores.tenantId} = ${tenants.id} AND ${stores.deletedAt} IS NULL
+          SELECT count(*)::int FROM stores s
+          WHERE s.tenant_id = tenants.id AND s.deleted_at IS NULL
         )`,
         usuarios: sql<number>`(
-          SELECT count(*)::int FROM ${users} WHERE ${users.tenantId} = ${tenants.id}
+          SELECT count(*)::int FROM users u WHERE u.tenant_id = tenants.id
         )`,
         createdAt: tenants.createdAt,
       })
@@ -252,9 +256,18 @@ export async function cadastroRoutes(app: FastifyInstance) {
       return reply.status(400).send({ error: 'Dados inválidos', campos: parsed.error.flatten().fieldErrors })
     }
 
+    const dados = { ...parsed.data }
+    if (dados.email) {
+      dados.email = dados.email.trim().toLowerCase()
+      const [emUso] = await db.select({ id: users.id }).from(users).where(eq(users.email, dados.email)).limit(1)
+      if (emUso && emUso.id !== id) {
+        return reply.status(409).send({ error: `Já existe usuário com o e-mail ${dados.email}` })
+      }
+    }
+
     const [user] = await db
       .update(users)
-      .set(parsed.data)
+      .set(dados)
       .where(eq(users.id, id))
       .returning({ id: users.id, email: users.email, nome: users.nome, role: users.role })
 

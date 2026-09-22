@@ -22,6 +22,26 @@ interface Alerta {
   limite: string
   canal: string
   ativo: boolean
+  /** Quando este alerta disparou pela última vez — null se nunca disparou. */
+  ultimoDisparo: string | null
+  ultimaMensagem: string | null
+  disparos: number
+}
+
+interface Disparo {
+  id: string
+  tipo: string
+  storeNome: string | null
+  mensagem: string | null
+  em: string
+}
+
+function haQuanto(iso: string): string {
+  const min = Math.round((Date.now() - new Date(iso).getTime()) / 60000)
+  if (min < 1) return 'agora'
+  if (min < 60) return `há ${min} min`
+  if (min < 48 * 60) return `há ${Math.round(min / 60)} h`
+  return `há ${Math.round(min / 1440)} dias`
 }
 
 const TIPOS: Record<string, { label: string; icon: any; cor: string; unidade: string; ajuda: string }> = {
@@ -55,11 +75,12 @@ const TIPOS: Record<string, { label: string; icon: any; cor: string; unidade: st
   },
 }
 
-const FORM_VAZIO = { tipo: 'consumo_mensal', limite: '', canal: 'email' }
+const FORM_VAZIO = { tipo: 'consumo_mensal', limite: '', canal: 'painel' }
 
 export default function Alertas() {
   const { lojaAtual } = useAuth()
   const [alertas, setAlertas] = useState<Alerta[]>([])
+  const [disparos, setDisparos] = useState<Disparo[]>([])
   const [carregando, setCarregando] = useState(true)
   const [erro, setErro] = useState('')
   const [sucesso, setSucesso] = useState('')
@@ -69,8 +90,11 @@ export default function Alertas() {
   const carregar = () => {
     setCarregando(true)
     setErro('')
-    api.get('/alerts')
-      .then((r) => setAlertas(r.data))
+    Promise.all([api.get('/alerts'), api.get('/alerts/disparos')])
+      .then(([a, d]) => {
+        setAlertas(a.data)
+        setDisparos(d.data)
+      })
       .catch((err) => setErro(mensagemDeErro(err, 'Não foi possível carregar os alertas.')))
       .finally(() => setCarregando(false))
   }
@@ -145,8 +169,8 @@ export default function Alertas() {
         <Sucesso mensagem={sucesso} />
 
         <Aviso
-          titulo="Um aviso por alerta a cada 24 horas"
-          mensagem="Enquanto a condição persistir, o alerta não é reenviado — a verificação roda a cada 5 minutos e você receberia centenas de e-mails por dia."
+          titulo="Os alertas aparecem aqui na tela"
+          mensagem="O envio por e-mail ainda não está ligado. A verificação roda a cada 5 minutos e, enquanto a condição persistir, o alerta não se repete antes de 24 horas."
         />
 
         {form && tipoAtual && (
@@ -178,12 +202,14 @@ export default function Alertas() {
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Canal</label>
+                {/* E-mail sai da lista enquanto não houver SMTP: oferecer um
+                    canal que não entrega é pior que não oferecer nenhum. */}
                 <select
                   value={form.canal}
                   onChange={(e) => setForm({ ...form, canal: e.target.value })}
                   className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-green-500/20 focus:border-green-500"
                 >
-                  <option value="email">E-mail</option>
+                  <option value="painel">Nesta tela</option>
                 </select>
               </div>
               <div className="md:col-span-3">
@@ -220,8 +246,18 @@ export default function Alertas() {
                         {t.label}
                       </p>
                       <p className="text-xs text-gray-500">
-                        Limite: {Number(a.limite).toLocaleString('pt-BR')} {t.unidade} · {a.canal}
+                        Limite: {Number(a.limite).toLocaleString('pt-BR')} {t.unidade}
                       </p>
+                      {/* O que o lojista realmente quer saber: disparou ou não. */}
+                      {a.ultimoDisparo ? (
+                        <p className="text-xs text-amber-700 mt-1">
+                          Disparou {haQuanto(a.ultimoDisparo)}
+                          {a.disparos > 1 && ` · ${a.disparos} vezes`}
+                          {a.ultimaMensagem && <span className="text-gray-500"> — {a.ultimaMensagem}</span>}
+                        </p>
+                      ) : (
+                        <p className="text-xs text-gray-400 mt-1">Ainda não disparou</p>
+                      )}
                     </div>
                     <button
                       onClick={() => alternar(a)}
@@ -242,6 +278,36 @@ export default function Alertas() {
             </div>
           )}
         </div>
+
+        {/* Histórico: sem e-mail, é aqui que o lojista descobre o que aconteceu
+            enquanto ele não estava olhando. */}
+        {disparos.length > 0 && (
+          <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden shadow-sm mt-6">
+            <div className="p-5 border-b border-gray-100">
+              <h2 className="font-semibold text-gray-900">Disparos recentes</h2>
+              <p className="text-xs text-gray-500 mt-0.5">Últimos {disparos.length} avisos das suas lojas</p>
+            </div>
+            <div className="divide-y divide-gray-100">
+              {disparos.map((d) => {
+                const t = TIPOS[d.tipo]
+                return (
+                  <div key={d.id} className="flex items-start gap-3 p-4">
+                    <div className="bg-amber-50 border border-amber-100 p-2 rounded-lg shrink-0">
+                      <Bell className="w-4 h-4 text-amber-600" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm text-gray-900">{d.mensagem || (t ? t.label : d.tipo)}</p>
+                      <p className="text-xs text-gray-500 mt-0.5">
+                        {d.storeNome ? `${d.storeNome} · ` : ''}
+                        {new Date(d.em).toLocaleString('pt-BR')} · {haQuanto(d.em)}
+                      </p>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )}
       </main>
     </div>
   )

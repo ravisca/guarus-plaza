@@ -8,6 +8,36 @@ está pronto e verificado — mas alguns itens bloqueiam o *deploy*.
 
 ---
 
+# ✅ Respondido em 2026-09-21
+
+O que você decidiu, e o que foi feito com cada resposta.
+
+| Item | Sua resposta | O que ficou |
+|---|---|---|
+| **A-01** chave do agent | "me dá o manual" | Passo a passo em `scripts/dash_Plaza/07-chave-do-agent.md`. **Continua sendo você quem executa** — sem isso a coleta para depois do deploy. |
+| **A-02** senhas de produção | "ainda não distribuímos acesso; tem que ter na tela como fazer" | A tela existe: menu lateral → **Trocar senha**. O endereço do sistema e essa instrução saem no CSV de acessos. Trocar a senha do `admin` continua pendente. |
+| **A-03** broker MQTT | "como faço isso?" | Passo a passo em `scripts/dash_Plaza/08-fechar-broker-mqtt.md`. |
+| **A-04** firewall | "não posso ligar agora" | **Removido da lista.** Risco aceito conscientemente: sem filtragem de entrada no servidor do shopping. Reavaliar quando a infra permitir. |
+| **A-05** backup | "teste depois; qual o melhor destino?" | Recomendação em `scripts/dash_Plaza/09-destino-do-backup.md`: Cloudflare R2 (você já tem conta), com cópia semanal para o servidor do shopping pela Tailscale. Criptografar antes de enviar. |
+| **A-06** `RUN_SEED=1` | "você pode fazer isso?" | Não pelo painel do Coolify (a rede corporativa bloqueia). **Resolvido no código:** o seed agora não faz nada em banco já populado e sai com sucesso — `RUN_SEED=1` deixou de sujar o log. |
+| **A-07** `COOLIFY_TOKEN` | "não vou rotacionar" | **Removido da lista.** Risco aceito: o token foi transmitido ao appliance Fortinet numa tentativa com `curl -k`. |
+| **A-08** `graphify-out` | "pode fazer" | Feito — saiu do versionamento no commit `17895d9`. |
+| **D-02** `/api/ingest` | "sim" | Rota confirmada sem uso. `INGEST_API_KEY` removida do código, do compose, do CI e do `.env.example`. |
+| **D-05** tensão nominal | "não tenho certeza ainda" | Mantido 220 V, configurável em `TENSAO_NOMINAL`, limite como desvio em volts. **Confirme quando souber.** |
+| **D-06** alertas | "pode ser apenas visual, sem e-mail" | Feito. O disparo é gravado e aparece na tela do lojista ("Disparou há 2 h" + histórico). E-mail volta com `ALERTA_EMAIL=1` e SMTP configurado. |
+| **D-07** offline em 10 min | "isso mesmo" | Mantido. |
+| **D-09** alertas corrompidos | "pode ver pra resolver" | **A corrupção não existe.** `alerts.store_id` tem chave estrangeira para `stores` desde o commit inicial: o Postgres recusava, e o efeito real era não conseguir criar alerta nenhum pela tela (erro 500). No lugar do script de correção entrou `npm run verificar:alertas`, que mostra os alertas que nunca vão disparar (loja sem relógio, horário não cadastrado, pausado). |
+| **D-10** senha provisória | "não precisa" | Usuários atuais ficam como estão. |
+| **Acessos em lote** | "cria um usuário por relógio e me entrega um CSV" | `npm run criar:lojistas` cria um acesso **por loja** (o relógio pertence à loja, e é a loja que fatura — a Loja 13, com dois relógios, é um acesso só) e gera o CSV com usuário, senha, relógios e endereço. O administrador edita nome e e-mail depois, pela tela. |
+
+**Um defeito encontrado ao fazer isso:** as contagens em subconsulta estavam todas
+zeradas — "lojas por inquilino", "usuários por inquilino" e "medidores por loja" na tela
+de Lojas. O drizzle renderiza `${tabela.coluna}` sem o nome da tabela dentro de um `sql`
+de SELECT, e a correlação virava uma comparação de duas colunas do próprio subselect:
+sempre falsa, sem erro nenhum. Sete ocorrências corrigidas.
+
+---
+
 # 🔴 Antes de subir para produção
 
 ## D-01 — ✅ Resolvido em 2026-09-14: acesso por vínculo usuário↔loja

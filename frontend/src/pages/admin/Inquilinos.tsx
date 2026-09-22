@@ -3,7 +3,7 @@ import Sidebar from '../../components/Sidebar'
 import api, { mensagemDeErro } from '../../services/api'
 import { Erro, Sucesso, Carregando, Vazio, SenhaUnica } from '../../components/Feedback'
 import SeletorLojas, { LojaVinculavel } from '../../components/SeletorLojas'
-import { Plus, X, Building2, UserPlus, Search, Store, KeyRound, Trash2, Clock } from 'lucide-react'
+import { Plus, X, Building2, UserPlus, Search, Store, KeyRound, Trash2, Clock, Pencil } from 'lucide-react'
 
 /**
  * Lojistas e acessos.
@@ -121,6 +121,7 @@ export default function Inquilinos() {
   const [formLojista, setFormLojista] = useState<FormLojista | null>(null)
   const [editandoLojas, setEditandoLojas] = useState<{ usuario: Usuario; storeIds: string[] } | null>(null)
   const [editandoSenha, setEditandoSenha] = useState<{ usuario: Usuario; modoSenha: 'gerar' | 'definir'; senha: string; exigirTroca: boolean } | null>(null)
+  const [editandoDados, setEditandoDados] = useState<{ usuario: Usuario; nome: string; email: string; whatsapp: string } | null>(null)
   const [credencial, setCredencial] = useState<{ email: string; senha: string; exigirTroca: boolean } | null>(null)
   const [salvando, setSalvando] = useState(false)
 
@@ -144,6 +145,28 @@ export default function Inquilinos() {
     setFormLojista(null)
     setEditandoLojas(null)
     setEditandoSenha(null)
+    setEditandoDados(null)
+  }
+
+  const salvarDados = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!editandoDados) return
+    setSalvando(true)
+    setErro('')
+    try {
+      const { data } = await api.put(`/admin/users/${editandoDados.usuario.id}`, {
+        nome: editandoDados.nome,
+        email: editandoDados.email,
+        whatsapp: editandoDados.whatsapp || null,
+      })
+      setSucesso(`Cadastro de ${data.email} atualizado.`)
+      setEditandoDados(null)
+      carregar()
+    } catch (err) {
+      setErro(mensagemDeErro(err, 'Não foi possível salvar o cadastro.'))
+    } finally {
+      setSalvando(false)
+    }
   }
 
   const criarInquilino = async (e: React.FormEvent) => {
@@ -289,6 +312,12 @@ export default function Inquilinos() {
               <Store className="w-3.5 h-3.5" /> Lojas
             </button>
           )}
+          <button
+            onClick={() => { fecharFormularios(); setEditandoDados({ usuario: u, nome: u.nome, email: u.email, whatsapp: u.whatsapp ?? '' }) }}
+            className="inline-flex items-center gap-1.5 text-xs font-medium text-gray-700 hover:text-gray-900 border border-gray-200 rounded-lg px-2.5 py-1.5"
+          >
+            <Pencil className="w-3.5 h-3.5" /> Editar
+          </button>
           <button
             onClick={() => { fecharFormularios(); setEditandoSenha({ usuario: u, modoSenha: 'definir', senha: '', exigirTroca: true }) }}
             className="inline-flex items-center gap-1.5 text-xs font-medium text-gray-700 hover:text-gray-900 border border-gray-200 rounded-lg px-2.5 py-1.5"
@@ -440,6 +469,39 @@ export default function Inquilinos() {
             <button onClick={salvarLojas} disabled={salvando} className="mt-4 px-5 py-2.5 bg-green-600 hover:bg-green-700 text-white font-semibold text-sm rounded-xl transition-all disabled:opacity-50">
               {salvando ? 'Salvando...' : `Salvar ${editandoLojas.storeIds.length} loja(s)`}
             </button>
+          </div>
+        )}
+
+        {editandoDados && (
+          <div className="bg-white rounded-2xl border border-gray-100 p-6 mb-6 shadow-sm max-w-2xl">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h3 className="font-semibold text-gray-900">Editar cadastro</h3>
+                <p className="text-xs text-gray-500 mt-0.5">O e-mail é o login — trocar aqui não afeta lojas nem senha.</p>
+              </div>
+              <button onClick={() => setEditandoDados(null)} className="text-gray-400 hover:text-gray-600">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <form onSubmit={salvarDados} className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Nome</label>
+                <input value={editandoDados.nome} onChange={(e) => setEditandoDados({ ...editandoDados, nome: e.target.value })} required className={campo} />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">E-mail (login)</label>
+                <input type="email" value={editandoDados.email} onChange={(e) => setEditandoDados({ ...editandoDados, email: e.target.value })} required className={campo} />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">WhatsApp</label>
+                <input value={editandoDados.whatsapp} onChange={(e) => setEditandoDados({ ...editandoDados, whatsapp: e.target.value })} className={campo} />
+              </div>
+              <div className="md:col-span-3">
+                <button type="submit" disabled={salvando} className="px-5 py-2.5 bg-green-600 hover:bg-green-700 text-white font-semibold text-sm rounded-xl transition-all disabled:opacity-50">
+                  {salvando ? 'Salvando...' : 'Salvar'}
+                </button>
+              </div>
+            </form>
           </div>
         )}
 

@@ -92,10 +92,9 @@ services:
     environment:
       - DATABASE_URL=postgresql://${DB_USER:-guarus}:${DB_PASSWORD}@postgres:5432/guarus_energy
       # db:push só precisa de DATABASE_URL, mas o db:seed manual importa
-      # src/config/env.ts, que valida JWT_SECRET (min 32) e INGEST_API_KEY (min 16)
-      # antes de qualquer coisa — sem eles o seed morre no boot.
+      # src/config/env.ts, que valida JWT_SECRET (min 32) antes de qualquer
+      # coisa — sem ele o seed morre no boot.
       - JWT_SECRET=${JWT_SECRET}
-      - INGEST_API_KEY=${INGEST_API_KEY}
       # Mesmo fuso da api: o teste de faturamento precisa rodar no ambiente real,
       # já que o fuso do processo é justamente o que deslocava os limites do mês.
       - TZ=America/Sao_Paulo
@@ -139,7 +138,6 @@ services:
     environment:
       - DATABASE_URL=postgresql://${DB_USER:-guarus}:${DB_PASSWORD}@postgres:5432/guarus_energy
       - JWT_SECRET=${JWT_SECRET}
-      - INGEST_API_KEY=${INGEST_API_KEY}
       - PORT=3000
       - HOST=0.0.0.0
       - CORS_ORIGIN=${CORS_ORIGIN:-*}

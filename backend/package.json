@@ -17,7 +17,9 @@
     "set-password": "tsx src/utils/setPassword.ts",
     "teste:faturamento": "tsx src/utils/testeFaturamento.ts",
     "teste:autorizacao": "tsx src/utils/testeAutorizacao.ts",
-    "teste": "npm run teste:faturamento && npm run teste:autorizacao"
+    "teste": "npm run teste:faturamento && npm run teste:autorizacao",
+    "criar:lojistas": "tsx src/utils/criarLojistas.ts",
+    "verificar:alertas": "tsx src/utils/verificarAlertas.ts"
   },
   "dependencies": {
     "@fastify/cookie": "^11.0.2",

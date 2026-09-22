@@ -77,9 +77,13 @@ export async function adminRoutes(app: FastifyInstance) {
         contratoInicio: stores.contratoInicio,
         contratoFim: stores.contratoFim,
         deletedAt: stores.deletedAt,
+        // Subconsulta escrita com SQL literal, de propósito: dentro de um `sql`
+        // de SELECT o drizzle renderiza a coluna SEM o nome da tabela, e
+        // `WHERE "store_id" = "id"` passa a comparar duas colunas da tabela do
+        // subselect — condição sempre falsa, contagem sempre zero, sem erro.
         medidores: sql<number>`(
-          SELECT count(*)::int FROM ${meters}
-          WHERE ${meters.storeId} = ${stores.id} AND ${meters.deletedAt} IS NULL
+          SELECT count(*)::int FROM meters m
+          WHERE m.store_id = stores.id AND m.deleted_at IS NULL
         )`,
       })
       .from(stores)

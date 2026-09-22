@@ -1,7 +1,7 @@
 import { FastifyInstance } from 'fastify'
 import { db } from '../../config/database.js'
-import { alerts, stores } from '../../config/schema.js'
-import { and, eq, inArray } from 'drizzle-orm'
+import { alerts, alertLogs, stores } from '../../config/schema.js'
+import { and, eq, inArray, desc, sql } from 'drizzle-orm'
 import { authenticate } from '../../utils/auth.js'
 import { createAlertSchema, atualizarAlertaSchema } from '../../utils/validators.js'
 import { lojasDoUsuario } from '../../utils/loja.js'
@@ -20,11 +20,69 @@ export async function alertRoutes(app: FastifyInstance) {
     return (await lojasDoUsuario(userId)).map((l) => l.id)
   }
 
+  /**
+   * Alertas com o último disparo de cada um.
+   *
+   * Sem isto a tela só mostra a configuração, e o lojista não tem como saber se
+   * o alerta chegou a disparar — o que, enquanto o aviso é visual e não por
+   * e-mail, é a informação principal da tela.
+   */
   app.get('/', async (request) => {
     const user = request.user as { id: string }
     const minhas = await idsDasMinhasLojas(user.id)
     if (minhas.length === 0) return []
-    return db.select().from(alerts).where(inArray(alerts.storeId, minhas))
+    return db
+      .select({
+        id: alerts.id,
+        storeId: alerts.storeId,
+        tipo: alerts.tipo,
+        limite: alerts.limite,
+        canal: alerts.canal,
+        ativo: alerts.ativo,
+        createdAt: alerts.createdAt,
+        // Subconsulta escrita com SQL literal, de propósito: dentro de um `sql`
+        // de SELECT o drizzle renderiza a coluna SEM o nome da tabela, e
+        // `WHERE "store_id" = "id"` passa a comparar duas colunas da tabela do
+        // subselect — condição sempre falsa, contagem sempre zero, sem erro.
+        ultimoDisparo: sql<string | null>`(
+          SELECT max(l.enviado_em) FROM alert_logs l WHERE l.alert_id = alerts.id
+        )`,
+        ultimaMensagem: sql<string | null>`(
+          SELECT l.mensagem FROM alert_logs l
+          WHERE l.alert_id = alerts.id
+          ORDER BY l.enviado_em DESC LIMIT 1
+        )`,
+        disparos: sql<number>`(
+          SELECT count(*)::int FROM alert_logs l WHERE l.alert_id = alerts.id
+        )`,
+      })
+      .from(alerts)
+      .where(inArray(alerts.storeId, minhas))
+      .orderBy(desc(alerts.createdAt))
+  })
+
+  /** Histórico de disparos das lojas do usuário — o "o que aconteceu" da tela. */
+  app.get('/disparos', async (request) => {
+    const user = request.user as { id: string }
+    const minhas = await idsDasMinhasLojas(user.id)
+    if (minhas.length === 0) return []
+    return db
+      .select({
+        id: alertLogs.id,
+        alertId: alertLogs.alertId,
+        tipo: alerts.tipo,
+        storeId: alerts.storeId,
+        storeNome: stores.nome,
+        mensagem: alertLogs.mensagem,
+        canal: alertLogs.canal,
+        em: alertLogs.enviadoEm,
+      })
+      .from(alertLogs)
+      .innerJoin(alerts, eq(alertLogs.alertId, alerts.id))
+      .leftJoin(stores, eq(alerts.storeId, stores.id))
+      .where(inArray(alerts.storeId, minhas))
+      .orderBy(desc(alertLogs.enviadoEm))
+      .limit(50)
   })
 
   app.post('/', async (request, reply) => {

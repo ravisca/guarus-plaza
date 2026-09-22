@@ -27,6 +27,19 @@ const credenciaisSorteadas: string[] = []
 async function seed() {
   console.log('Seeding database...')
 
+  // Banco já populado não é repopulado.
+  //
+  // O seed roda no `migrate` a cada deploy quando `RUN_SEED=1` ficou ligado no
+  // painel — e ligado ele ficou. Sem esta guarda, cada deploy tentava recriar
+  // inquilino, loja e usuário, falhava no índice único e deixava um erro no log
+  // que mascara erro de verdade. Falhar por duplicata não é o mesmo que "não
+  // havia nada a fazer", e o log precisa distinguir as duas coisas.
+  const [existente] = await db.select({ id: users.id }).from(users).limit(1)
+  if (existente) {
+    console.log('Banco já populado — seed ignorado (nada foi alterado).')
+    process.exit(0)
+  }
+
   const [adminTenant] = await db.insert(tenants).values({
     nome: 'Guarus Plaza Admin',
     cnpj: '00000000000000',
