@@ -4,7 +4,7 @@ import api, { mensagemDeErro } from '../../services/api'
 import { Erro, Sucesso, Aviso, Carregando, Vazio } from '../../components/Feedback'
 import {
   Download, FileText, CheckCircle, Clock, AlertTriangle, Calendar,
-  ChevronDown, ChevronRight, Unlock, BadgeCheck,
+  ChevronDown, ChevronRight, Unlock, BadgeCheck, Printer,
 } from 'lucide-react'
 
 /**
@@ -90,6 +90,7 @@ export default function Billing() {
   const [mes, setMes] = useState(hoje.getMonth() + 1)
   const [ano, setAno] = useState(hoje.getFullYear())
   const [fechando, setFechando] = useState(false)
+  const [gerando, setGerando] = useState<'csv' | 'html' | null>(null)
   const [resultado, setResultado] = useState<Fechamento | null>(null)
   const [historico, setHistorico] = useState<Ciclo[]>([])
   const [carregando, setCarregando] = useState(false)
@@ -127,6 +128,41 @@ export default function Billing() {
       setErro(mensagemDeErro(err, 'Não foi possível fechar o mês.'))
     } finally {
       setFechando(false)
+    }
+  }
+
+  /**
+   * Folha de conferência do período selecionado.
+   *
+   * É o passo que falta antes de cobrar alguém: bater o número do sistema com o
+   * display do medidor e com a fatura da concessionária. Sem isto, essa
+   * conferência só era possível com acesso de terminal ao servidor.
+   */
+  const baixarConferencia = async (formato: 'csv' | 'html') => {
+    setErro('')
+    setGerando(formato)
+    try {
+      const { data } = await api.get(`/admin/conferencia?mes=${mes}&ano=${ano}&formato=${formato}`, {
+        responseType: 'blob',
+      })
+      const url = URL.createObjectURL(data as Blob)
+      if (formato === 'csv') {
+        const a = document.createElement('a')
+        a.href = url
+        a.download = `conferencia_${ano}-${String(mes).padStart(2, '0')}.csv`
+        a.click()
+      } else {
+        // Abre numa aba para o operador conferir e mandar imprimir (Ctrl+P).
+        window.open(url, '_blank')
+      }
+      // Revogar na hora cancelaria o download que acabou de começar.
+      setTimeout(() => URL.revokeObjectURL(url), 60_000)
+    } catch {
+      // O corpo do erro vem como Blob por causa do responseType, então
+      // `mensagemDeErro` não conseguiria ler a mensagem da API.
+      setErro('Não foi possível gerar a conferência. Tente de novo em alguns instantes.')
+    } finally {
+      setGerando(null)
     }
   }
 
@@ -251,7 +287,36 @@ export default function Billing() {
               <FileText className="w-4 h-4" />
               {fechando ? 'Fechando...' : 'Fechar mês'}
             </button>
+
+            {/* Conferir antes de fechar: o fechamento emite valor, e o valor só
+                deveria sair depois de alguém ter batido o número com o medidor. */}
+            <div className="flex gap-2">
+              <button
+                onClick={() => baixarConferencia('html')}
+                disabled={gerando !== null}
+                className="inline-flex items-center gap-2 px-4 py-3 bg-white border border-gray-200 text-gray-700 font-medium text-sm rounded-xl hover:bg-gray-50 transition-all disabled:opacity-50"
+                title="Folha com leitura inicial e final de cada relógio, para imprimir e conferir no local"
+              >
+                <Printer className="w-4 h-4" />
+                {gerando === 'html' ? 'Gerando...' : 'Folha de conferência'}
+              </button>
+              <button
+                onClick={() => baixarConferencia('csv')}
+                disabled={gerando !== null}
+                className="inline-flex items-center gap-2 px-4 py-3 bg-white border border-gray-200 text-gray-700 font-medium text-sm rounded-xl hover:bg-gray-50 transition-all disabled:opacity-50"
+                title="Mesmos dados em CSV, para cruzar com a fatura da concessionária"
+              >
+                <Download className="w-4 h-4" />
+                {gerando === 'csv' ? 'Gerando...' : 'CSV'}
+              </button>
+            </div>
           </div>
+
+          <p className="text-xs text-gray-500 mt-4">
+            A folha de conferência mostra a leitura inicial e final de cada relógio e destaca onde a
+            subtração simples não bate com o kWh cobrável — é o que você leva para comparar com o
+            display do medidor antes de fechar o mês.
+          </p>
         </div>
 
         <Erro mensagem={erro} aoTentarDeNovo={carregar} />

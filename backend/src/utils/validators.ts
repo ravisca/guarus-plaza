@@ -145,3 +145,15 @@ export const ingestBatchSchema = z.object({
     }),
   })),
 })
+
+/**
+ * Folha de conferência. Sem `ano`/`mes` vale o mês corrente; `de`/`ate` permitem
+ * um recorte livre (por exemplo, da última leitura de display até agora).
+ */
+export const conferenciaQuerySchema = z.object({
+  ano: z.coerce.number().int().min(2024).max(2100).optional(),
+  mes: z.coerce.number().int().min(1).max(12).optional(),
+  de: z.string().datetime().optional(),
+  ate: z.string().datetime().optional(),
+  formato: z.enum(['json', 'csv', 'html']).default('json'),
+})

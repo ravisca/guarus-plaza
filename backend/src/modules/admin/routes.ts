@@ -3,7 +3,13 @@ import { db } from '../../config/database.js'
 import { stores, meters, tenants, tariffs, billingCycles } from '../../config/schema.js'
 import { eq, sql, desc, and, isNull } from 'drizzle-orm'
 import { requireAdmin } from '../../utils/auth.js'
-import { createStoreSchema, createMeterSchema, closeBillingSchema, createTariffSchema } from '../../utils/validators.js'
+import {
+  createStoreSchema,
+  createMeterSchema,
+  closeBillingSchema,
+  createTariffSchema,
+  conferenciaQuerySchema,
+} from '../../utils/validators.js'
 import {
   limitesDoMes,
   valorarConsumo,
@@ -13,6 +19,11 @@ import {
   LACUNA_MAX_MIN,
   FUSO_LOCAL,
 } from '../billing/calculo.js'
+import {
+  levantarConferencia,
+  conferenciaParaCsv,
+  conferenciaParaHtml,
+} from '../billing/conferencia.js'
 
 export async function adminRoutes(app: FastifyInstance) {
   app.addHook('preHandler', requireAdmin)
@@ -424,6 +435,54 @@ export async function adminRoutes(app: FastifyInstance) {
       periodo: { inicio: inicio.toISOString(), fim: fim.toISOString(), fuso: FUSO_LOCAL },
       billing: results,
     }
+  })
+
+  /**
+   * Folha de conferência da medição, para baixar da tela.
+   *
+   * Existe porque conferir o número com o display do medidor e com a fatura da
+   * concessionária é o passo que falta antes de cobrar alguém — e, sem isto,
+   * esse passo exigia acesso de terminal ao servidor. Mesmo módulo que a linha
+   * de comando (`npm run conferencia`) usa.
+   */
+  app.get('/conferencia', async (request, reply) => {
+    const query = conferenciaQuerySchema.safeParse(request.query)
+    if (!query.success) {
+      return reply.status(400).send({ error: 'Parâmetros inválidos', campos: query.error.flatten().fieldErrors })
+    }
+
+    const corrente = await mesCorrente()
+    const ano = query.data.ano ?? corrente.ano
+    const mes = query.data.mes ?? corrente.mes
+    const limites = await limitesDoMes(ano, mes)
+
+    const inicio = query.data.de ? new Date(query.data.de) : limites.inicio
+    // Mês em andamento: até agora. Até o fim do mês, a borda final acusaria
+    // "coleta parada" pelos dias que ainda não aconteceram.
+    const fimPadrao = limites.fim.getTime() > Date.now() ? new Date() : limites.fim
+    const fim = query.data.ate ? new Date(query.data.ate) : fimPadrao
+
+    if (!(inicio < fim)) {
+      return reply.status(400).send({ error: '`de` precisa ser anterior a `ate`' })
+    }
+
+    const conferencia = await levantarConferencia(inicio, fim)
+    const nome = `conferencia-${ano}-${String(mes).padStart(2, '0')}`
+
+    if (query.data.formato === 'csv') {
+      return reply
+        .header('Content-Type', 'text/csv; charset=utf-8')
+        .header('Content-Disposition', `attachment; filename="${nome}.csv"`)
+        .send(conferenciaParaCsv(conferencia))
+    }
+
+    if (query.data.formato === 'html') {
+      return reply
+        .header('Content-Type', 'text/html; charset=utf-8')
+        .send(conferenciaParaHtml(conferencia))
+    }
+
+    return conferencia
   })
 
   app.get('/tariffs', async () => {
