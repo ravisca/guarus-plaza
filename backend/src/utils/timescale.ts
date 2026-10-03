@@ -35,6 +35,23 @@ const COMPRIMIR_APOS = process.env.TIMESCALE_COMPRIMIR_APOS || '30 days'
  */
 const RETENCAO = process.env.TIMESCALE_RETENCAO || ''
 
+/**
+ * Autorização explícita para a conversão inicial.
+ *
+ * O `db:timescale` roda a cada deploy, e a conversão de uma tabela já populada
+ * não é uma operação de deploy: ela move os dados para os chunks e segura um
+ * lock na tabela que a coleta escreve a cada 10 segundos. Deixar isso disparar
+ * sozinho significa transformar um deploy comum numa janela de manutenção que
+ * ninguém combinou — e descobrir isso pelo relógio parado no painel.
+ *
+ * Sem `TIMESCALE_CONVERTER=1`, a conversão é apenas anunciada e pulada. O
+ * sistema funciona sem hypertable: só varre mais dados por consulta.
+ *
+ * Nada disto vale para tabela vazia (ambiente novo, CI, banco de teste), onde
+ * não há dado para mover e a conversão é instantânea.
+ */
+const CONVERSAO_AUTORIZADA = process.env.TIMESCALE_CONVERTER === '1'
+
 export async function configurarTimescale(): Promise<void> {
   const [ext] = await db.execute<{ existe: boolean }>(sql`
     SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'timescaledb') AS existe
@@ -53,7 +70,21 @@ export async function configurarTimescale(): Promise<void> {
   `)
 
   if (!ja?.existe) {
-    console.log(`[TIMESCALE] convertendo readings em hypertable (chunks de ${INTERVALO_CHUNK})...`)
+    // Quantas linhas existem decide se isto é uma conversão instantânea ou uma
+    // janela de manutenção. Tabela vazia converte sem autorização nenhuma.
+    const [contagem] = await db.execute<{ n: string }>(sql`SELECT count(*)::text AS n FROM readings`)
+    const linhas = Number(contagem?.n || 0)
+
+    if (linhas > 0 && !CONVERSAO_AUTORIZADA) {
+      console.log(
+        `[TIMESCALE] readings tem ${linhas.toLocaleString('pt-BR')} linha(s) e NÃO foi convertida: ` +
+        'a conversão move os dados para os chunks e segura lock na tabela que a coleta escreve.',
+      )
+      console.log('[TIMESCALE] para converter, rode um deploy com TIMESCALE_CONVERTER=1 em janela combinada.')
+      return
+    }
+
+    console.log(`[TIMESCALE] convertendo readings em hypertable (chunks de ${INTERVALO_CHUNK}, ${linhas.toLocaleString('pt-BR')} linha(s))...`)
     // A PK já é (meter_id, time): o Timescale exige que a coluna de
     // particionamento faça parte de toda restrição única, e é por isso que a
     // chave foi criada nessa ordem.
