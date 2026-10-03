@@ -22,3 +22,7 @@ Obsidian/
 
 # CSV de acessos gerado por `npm run criar:lojistas` — contém senha em texto.
 lojistas-*.csv
+
+# Relatórios de conferência gerados por `npm run conferencia`.
+conferencia-*.csv
+conferencia-*.html

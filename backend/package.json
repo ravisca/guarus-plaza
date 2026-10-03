@@ -19,7 +19,8 @@
     "teste:autorizacao": "tsx src/utils/testeAutorizacao.ts",
     "teste": "npm run teste:faturamento && npm run teste:autorizacao",
     "criar:lojistas": "tsx src/utils/criarLojistas.ts",
-    "verificar:alertas": "tsx src/utils/verificarAlertas.ts"
+    "verificar:alertas": "tsx src/utils/verificarAlertas.ts",
+    "conferencia": "tsx src/utils/conferencia.ts"
   },
   "dependencies": {
     "@fastify/cookie": "^11.0.2",
