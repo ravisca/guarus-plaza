@@ -3,3 +3,6 @@ dist/
 .env
 .env.local
 *.log
+
+# Central de ajuda gerada de ajuda/*.md no build (npm run build).
+public/ajuda/

@@ -1,0 +1,101 @@
+{
+  "produto": "Guarus Plaza Energia",
+  "assinatura": "RBX Soluções & Tech",
+  "base": "/ajuda",
+  "saida": "../public/ajuda",
+  "urls": "html",
+  "fontes": "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500&display=swap",
+  "logo": { "claro": "marca/rbx-logo-preta.svg", "escuro": "marca/rbx-logo-branca.svg" },
+  "marcaDagua": "marca/rbx-x-mark.svg",
+  "voltar": { "rotulo": "Abrir o painel", "href": "/" },
+  "textos": { "exemploBusca": "Ex.: senha, fatura em conferência, fechar mês, relógio offline" },
+  "inicio": {
+    "titulo": "Como usar o painel de energia.",
+    "subtitulo": "Passo a passo, com as telas de verdade.",
+    "bloco": "fluxo",
+    "blocoTitulo": "Do relógio à fatura",
+    "rodape": "Guarus Plaza Energia · RBX Soluções & Tech. Não achou o que procurava? Fale com a administração do shopping."
+  },
+  "manuais": [
+    {
+      "slug": "lojista",
+      "arquivo": "lojista.md",
+      "titulo": "Manual do Lojista",
+      "curto": "Lojista",
+      "para": "Quem acompanha o consumo, as faturas e os alertas da própria loja."
+    },
+    {
+      "slug": "administrador",
+      "arquivo": "administrador.md",
+      "titulo": "Manual do Administrador",
+      "curto": "Administrador",
+      "para": "A administração do shopping: lojas, relógios, tarifas, acessos e fechamento do mês."
+    }
+  ],
+  "atalhos": [
+    { "manual": "lojista", "titulo": "2.1 Entrar pela primeira vez", "rotulo": "Entrar pela primeira vez" },
+    { "manual": "lojista", "titulo": "2.2 Esqueci a senha", "rotulo": "Esqueci a senha" },
+    { "manual": "lojista", "titulo": "4. Histórico — as suas faturas", "rotulo": "Entender a fatura" },
+    { "manual": "lojista", "titulo": "5.2 Criar um alerta", "rotulo": "Criar um alerta" },
+    { "manual": "administrador", "titulo": "2. Primeira configuração (faça nesta ordem)", "rotulo": "Primeira configuração" },
+    { "manual": "administrador", "titulo": "7.1 Cadastrar um lojista", "rotulo": "Dar acesso a um lojista" },
+    { "manual": "administrador", "titulo": "8.2 Fechar o mês", "rotulo": "Fechar o mês" },
+    { "manual": "administrador", "titulo": "8.3 Resolver as lojas em revisão", "rotulo": "Fatura em revisão" }
+  ],
+  "contexto": {
+    "login": "lojista#2-1-entrar-pela-primeira-vez",
+    "trocar-senha": "lojista#2-3-trocar-a-senha-quando-quiser",
+    "lojista": "lojista#3-meu-consumo-a-tela-principal",
+    "lojista/historico": "lojista#4-historico-as-suas-faturas",
+    "lojista/alertas": "lojista#5-alertas-ser-avisado-sem-ficar-olhando-o-painel",
+    "admin": "administrador#3-dashboard-o-shopping-de-relance",
+    "admin/lojas": "administrador#4-lojas",
+    "admin/medidores": "administrador#5-medidores-relogios",
+    "admin/tarifas": "administrador#6-tarifas",
+    "admin/inquilinos": "administrador#7-lojistas-e-acessos",
+    "admin/faturamento": "administrador#8-faturamento-fechar-o-mes"
+  },
+  "blocos": {
+    "fluxo": {
+      "tipo": "fluxo",
+      "rotulo": "Do relógio à fatura, em cinco passos",
+      "itens": [
+        ["O relógio mede", "Lido a cada 30 segundos, sem ninguém digitar"],
+        ["O sistema guarda", "Consumo do mês sobe ao vivo no painel"],
+        ["Você acompanha", "Gráficos, relógios e alertas"],
+        ["O mês fecha", "A administração confere e fecha"],
+        ["A fatura aparece", "Com o demonstrativo das leituras"]
+      ]
+    },
+    "fluxo-admin": {
+      "tipo": "fluxo",
+      "rotulo": "O caminho da leitura até a fatura",
+      "itens": [
+        ["Relógios Kron", "Um ou mais por loja"],
+        ["Coleta no shopping", "Lê todos a cada 30 s"],
+        ["Sistema na internet", "Busca as leituras a cada 10 s"],
+        ["Conferência", "Folha de conferência × display"],
+        ["Fechamento", "Fatura com a trilha do valor"]
+      ]
+    },
+    "estados": {
+      "tipo": "grade",
+      "rotulo": "As situações de uma fatura",
+      "itens": [
+        ["fechado", "Valor emitido, pronto para pagar", "Conferir e pagar →"],
+        ["em conferência", "Dado incompleto; valor zerado até conferir", "Aguardar"],
+        ["pago", "Pagamento registrado", "—"]
+      ]
+    },
+    "estados-fatura": {
+      "tipo": "grade",
+      "rotulo": "As situações de uma fatura no fechamento",
+      "itens": [
+        ["requer revisão", "Dado incompleto, valor não emitido", "Ver o motivo →"],
+        ["fechado", "Valor emitido", "Baixar pago →"],
+        ["pago", "Pagamento registrado", "—"],
+        ["aberto", "Reaberta para recalcular", "Fechar de novo →"]
+      ]
+    }
+  }
+}

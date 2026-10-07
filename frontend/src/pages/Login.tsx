@@ -151,6 +151,17 @@ export default function Login() {
             </button>
           </form>
 
+          <p className="mt-6 text-center text-sm">
+            <a
+              href="/ajuda/lojista.html#2-1-entrar-pela-primeira-vez"
+              target="_blank"
+              rel="noopener"
+              className="text-gray-500 hover:text-gray-900 underline underline-offset-4"
+            >
+              Ajuda para entrar
+            </a>
+          </p>
+
           <p className="mt-8 text-center text-xs text-gray-400">
             Sistema de gestão de energia para Guarus Plaza
           </p>
