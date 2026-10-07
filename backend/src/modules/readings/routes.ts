@@ -60,7 +60,11 @@ export async function readingRoutes(app: FastifyInstance) {
       }
     }
 
-    const periodo = await valorarConsumo(loja.meterIds, inicio, fim)
+    // No mês em andamento, mede até agora: com o fim do mês como borda, o trecho
+    // que ainda não aconteceu contava como lacuna de coleta, e todo lojista via
+    // "em conferência" o mês inteiro.
+    const ate = new Date(Math.min(Date.now(), fim.getTime()))
+    const periodo = await valorarConsumo(loja.meterIds, inicio, ate)
 
     // Qualidade de energia das últimas 24h. A média do mês inteiro não serve:
     // uma queda de tensão de uma hora nunca move o número o bastante para
