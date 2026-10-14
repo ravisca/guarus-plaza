@@ -13,7 +13,14 @@
 
 services:
   postgres:
-    image: timescale/timescaledb:2.17.2-pg16
+    # NÃO fixar numa versão mais antiga que a do volume. O banco foi criado com
+    # `latest-pg16` e a extensão instalada nele é mais nova que 2.17.2: com a
+    # imagem 2.17.2 o Postgres sobe mas não abre o `guarus_energy` (falta a
+    # biblioteca daquela versão) e a stack inteira entra em loop — foi o que
+    # derrubou a produção depois do deploy de 2026-10-07. Para fixar, primeiro
+    # descubra a versão instalada: SELECT extversion FROM pg_extension WHERE
+    # extname = 'timescaledb'; e use uma imagem dessa versão ou mais nova.
+    image: timescale/timescaledb:latest-pg16
     environment:
       POSTGRES_DB: guarus_energy
       POSTGRES_USER: ${DB_USER:-guarus}
@@ -40,7 +47,8 @@ services:
   # contra perder o servidor. A cópia para fora da VPS continua sendo um passo
   # operacional (ver INF-05 no MELHORIAS.md).
   backup:
-    image: timescale/timescaledb:2.17.2-pg16
+    # Mesma imagem do `postgres`: o pg_dump precisa ser da mesma versão ou mais novo.
+    image: timescale/timescaledb:latest-pg16
     environment:
       - PGPASSWORD=${DB_PASSWORD}
       - PGUSER=${DB_USER:-guarus}
